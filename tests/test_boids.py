@@ -8,11 +8,13 @@ That is what this file exists to prevent.
 import numpy as np
 import pytest
 
-from boids import calculate_separation, get_torus
+from boids import calculate_separation, get_torus, step, velocity_capper
 
 # Every test in this file runs in a 100x100 torus.
 BOUNDS = 100.0
 SEPARATION_RADIUS = 20.0
+MAX_SPEED = 5.0
+DT = 0.1
 
 
 # --- get_torus ---------------------------------------------------------------
@@ -212,3 +214,143 @@ def test_single_bird_world():
 
     assert not np.isnan(force).any()
     np.testing.assert_array_equal(force, [0.0, 0.0])
+
+
+# --- velocity_capper ---------------------------------------------------------
+
+def test_capper_leaves_slow_velocity_untouched():
+    """Under the cap the velocity must come back completely unchanged."""
+    v = np.array([1.0, 2.0])  # speed ~2.24, well under 5
+
+    np.testing.assert_array_equal(velocity_capper(v, MAX_SPEED), v)
+
+
+def test_capper_shortens_the_arrow_without_turning_it():
+    """Capping limits magnitude only - heading must survive untouched.
+
+    An implementation that returns `max_speed` itself passes a magnitude
+    check by accident while pointing the bird somewhere it was never going,
+    so the direction assertion is the one doing the work here.
+    """
+    v = np.array([6.0, 8.0])  # speed exactly 10
+    out = velocity_capper(v, MAX_SPEED)
+
+    assert np.linalg.norm(out) == pytest.approx(MAX_SPEED)
+    np.testing.assert_allclose(out / np.linalg.norm(out), v / np.linalg.norm(v))
+    np.testing.assert_allclose(out, [3.0, 4.0])
+
+
+def test_capper_leaves_velocity_exactly_at_the_cap():
+    """The boundary case: speed == max_speed must not be rescaled."""
+    v = np.array([3.0, 4.0])  # speed exactly 5
+
+    np.testing.assert_allclose(velocity_capper(v, MAX_SPEED), v)
+
+
+def test_capper_handles_a_motionless_bird():
+    """A stationary bird has speed 0. Normalising it would divide by zero and
+    produce NaN without raising, so the branch must not be taken at all."""
+    out = velocity_capper(np.array([0.0, 0.0]), MAX_SPEED)
+
+    assert not np.isnan(out).any(), "NaN velocity would spread to every later tick"
+    np.testing.assert_array_equal(out, [0.0, 0.0])
+
+
+# --- step: the reconstruction invariant --------------------------------------
+
+def _reconstruct_velocity(velocities, forces, boid_id, dt, max_speed):
+    """Re-derive one bird's new velocity from the RECORDED forces alone.
+
+    This is the whole point of the exercise: if the numbers stored in the
+    forces dict cannot reproduce the velocity update the simulator actually
+    performed, then those numbers are not labels for this simulation, and
+    every probe trained on them is fitting something that never happened.
+    """
+    total = (forces["separation"][boid_id]
+             + forces["alignment"][boid_id]
+             + forces["cohesion"][boid_id])
+    return velocity_capper(velocities[boid_id] + total * dt, max_speed)
+
+
+def test_recorded_forces_reconstruct_the_velocity_update():
+    """The uncapped case: recorded forces sum straight to the velocity change."""
+    positions = np.array([[10.0, 10.0],
+                          [15.0, 10.0],
+                          [80.0, 80.0]])
+    velocities = np.array([[1.0, 0.0],
+                           [-1.0, 0.0],
+                           [0.5, 0.5]])
+
+    _, new_velocities, forces = step(
+        positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, MAX_SPEED
+    )
+
+    for i in range(len(positions)):
+        np.testing.assert_allclose(
+            _reconstruct_velocity(velocities, forces, i, DT, MAX_SPEED),
+            new_velocities[i],
+            err_msg=f"recorded forces do not reproduce bird {i}'s velocity update",
+        )
+
+
+def test_reconstruction_holds_when_the_speed_cap_fires():
+    """The case that actually matters.
+
+    Once the cap engages, recorded forces no longer sum to the velocity
+    change - the relationship is `cap(v_old + sum(f) * dt) == v_new`, not a
+    plain sum. A reconstruction test that never trips the cap verifies only
+    the easy half and would pass against a simulator whose labels are wrong
+    in exactly the regime where birds are moving fastest.
+    """
+    max_speed = 0.5  # low enough that every bird below exceeds it
+    positions = np.array([[10.0, 10.0],
+                          [15.0, 10.0],
+                          [80.0, 80.0]])
+    velocities = np.array([[1.0, 0.0],
+                           [-1.0, 0.0],
+                           [0.5, 0.5]])
+
+    _, new_velocities, forces = step(
+        positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, max_speed
+    )
+
+    # Guard the test's own premise: if the cap never fires this proves nothing.
+    uncapped = np.array([
+        velocities[i] + (forces["separation"][i]
+                         + forces["alignment"][i]
+                         + forces["cohesion"][i]) * DT
+        for i in range(len(positions))
+    ])
+    assert np.any(np.linalg.norm(uncapped, axis=1) > max_speed), (
+        "premise failed: the cap never fired, so this test verifies nothing"
+    )
+
+    for i in range(len(positions)):
+        np.testing.assert_allclose(
+            _reconstruct_velocity(velocities, forces, i, DT, max_speed),
+            new_velocities[i],
+            err_msg=f"reconstruction broke for bird {i} once the cap fired",
+        )
+        assert np.linalg.norm(new_velocities[i]) <= max_speed + 1e-12
+
+
+def test_positions_stay_inside_the_world():
+    """`pos %= bounds` every tick is the invariant get_torus depends on.
+
+    Both birds start within half a step of an edge and are moving straight at
+    it, so each must wrap round rather than leaving the box.
+    """
+    positions = np.array([[99.9, 50.0],
+                          [50.0, 99.9]])
+    velocities = np.array([[10.0, 0.0],
+                           [0.0, 10.0]])
+
+    new_positions, _, _ = step(
+        positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, MAX_SPEED
+    )
+
+    assert np.all(new_positions >= 0.0)
+    assert np.all(new_positions < BOUNDS)
+    # confirm they wrapped rather than simply not reaching the edge
+    assert new_positions[0][0] < 1.0, "bird 0 should have crossed the x seam"
+    assert new_positions[1][1] < 1.0, "bird 1 should have crossed the y seam"
