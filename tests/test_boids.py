@@ -354,3 +354,149 @@ def test_positions_stay_inside_the_world():
     # confirm they wrapped rather than simply not reaching the edge
     assert new_positions[0][0] < 1.0, "bird 0 should have crossed the x seam"
     assert new_positions[1][1] < 1.0, "bird 1 should have crossed the y seam"
+
+
+# --- separation: the force cap -----------------------------------------------
+
+def test_force_cap_limits_magnitude_without_rotating_it():
+    """Two birds 0.5 apart. Uncapped the 1/d law gives magnitude 2.0.
+
+    The cap must bound the magnitude and leave the heading alone - exactly
+    what `velocity_capper` does for speed. The failure this exists to catch
+    is clamping `dist` itself instead of the magnitude expression: that makes
+    `offset / dist` a half-length vector rather than a unit one, so the force
+    comes out at 0.5 instead of the capped 1.0, and inside the cap radius the
+    repulsion would grow with distance instead of shrinking. Nothing raises.
+    """
+    positions = np.array([[10.0, 50.0],
+                          [10.5, 50.0]])
+
+    uncapped = calculate_separation(
+        0, positions, SEPARATION_RADIUS, BOUNDS, sep_force_cap=10.0
+    )
+    capped = calculate_separation(
+        0, positions, SEPARATION_RADIUS, BOUNDS, sep_force_cap=1.0
+    )
+
+    # Guard the premise: if the cap never bites, this test proves nothing.
+    assert np.linalg.norm(uncapped) == pytest.approx(2.0)
+
+    np.testing.assert_allclose(capped, [-1.0, 0.0])
+    assert np.linalg.norm(capped) == pytest.approx(1.0), (
+        "magnitude should be the cap exactly - 0.5 means `dist` was clamped "
+        "and `direction` is no longer a unit vector"
+    )
+
+
+def test_force_cap_leaves_distant_neighbours_alone():
+    """A neighbour at d = 5 gives magnitude 0.2, far under the cap.
+
+    The cap must be inert everywhere except very close range, or it is
+    quietly rescaling every label in the dataset.
+    """
+    positions = np.array([[10.0, 50.0],
+                          [15.0, 50.0]])
+
+    force = calculate_separation(
+        0, positions, SEPARATION_RADIUS, BOUNDS, sep_force_cap=1.0
+    )
+
+    np.testing.assert_allclose(force, [-0.2, 0.0])
+
+
+# --- step: the physics constants are actually read ---------------------------
+
+def test_step_reads_the_separation_weight():
+    """`w_sep` must scale the recorded force, and proportionally.
+
+    Deleting `* w_sep` from `step` passed all twenty of the tests above. The
+    weights are not decoration - NOTES.md makes unequal weights the mechanism
+    that spreads the three rules' acquisition times apart, so a silently
+    ignored weight does not crash anything, it just deletes the experiment's
+    independent variable.
+
+    This asserts the ratio rather than a hardcoded 1.5, so retuning the
+    weights later does not turn this into a false alarm.
+    """
+    positions = np.array([[10.0, 50.0],
+                          [15.0, 50.0]])
+    velocities = np.zeros((2, 2))
+
+    raw = calculate_separation(0, positions, SEPARATION_RADIUS, BOUNDS)
+
+    _, _, forces_1x = step(positions, velocities, DT, SEPARATION_RADIUS,
+                           BOUNDS, MAX_SPEED, w_sep=1.0)
+    _, _, forces_2x = step(positions, velocities, DT, SEPARATION_RADIUS,
+                           BOUNDS, MAX_SPEED, w_sep=2.0)
+
+    # weight 1.0 must leave the raw force untouched: it multiplies, not adds
+    np.testing.assert_allclose(forces_1x["separation"][0], raw)
+    # and doubling the weight must double the recorded force
+    np.testing.assert_allclose(forces_2x["separation"][0],
+                               2.0 * forces_1x["separation"][0])
+
+
+def test_step_reads_the_separation_force_cap():
+    """`sep_force_cap` must reach `calculate_separation`.
+
+    A parameter that `step` accepts and then drops is invisible: the callee's
+    default silently sets the physics, the top-level config that gets recorded
+    alongside the dataset says nothing about it, and the run is not
+    reproducible from its own metadata.
+    """
+    positions = np.array([[10.0, 50.0],
+                          [10.5, 50.0]])   # d = 0.5, uncapped magnitude 2.0
+    velocities = np.zeros((2, 2))
+
+    _, _, tight = step(positions, velocities, DT, SEPARATION_RADIUS,
+                       BOUNDS, MAX_SPEED, sep_force_cap=1.0, w_sep=1.0)
+    _, _, loose = step(positions, velocities, DT, SEPARATION_RADIUS,
+                       BOUNDS, MAX_SPEED, sep_force_cap=10.0, w_sep=1.0)
+
+    np.testing.assert_allclose(tight["separation"][0], [-1.0, 0.0])
+    np.testing.assert_allclose(loose["separation"][0], [-2.0, 0.0])
+
+
+# --- step: boundaries and purity ---------------------------------------------
+
+def test_positions_wrap_the_lower_seam():
+    """Crossing x = 0 travelling in -x.
+
+    The suite already covers the upper seam (99.9 -> 0.4). The lower one
+    relies on Python's modulo returning a non-negative result for a positive
+    modulus - which is a language guarantee, not a universal one; C's fmod
+    would leave -0.4 here. `get_torus` assumes every position lives in
+    [0, bounds), so that assumption is worth pinning.
+    """
+    positions = np.array([[0.1, 50.0]])
+    velocities = np.array([[-10.0, 0.0]])   # capped to -5.0, so -0.5 per tick
+
+    new_positions, _, _ = step(
+        positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, MAX_SPEED
+    )
+
+    np.testing.assert_allclose(new_positions[0], [99.6, 50.0])
+    assert np.all(new_positions >= 0.0)
+
+
+def test_step_does_not_mutate_its_inputs():
+    """Double-buffering: every force for tick t comes from the state at t.
+
+    `step` currently builds fresh arrays, so this passes today. It is here
+    because the obvious optimisation later - doing `positions %= bounds` in
+    place instead of allocating - would compute some birds' forces against a
+    half-updated world. The forces would still be internally consistent, so
+    the reconstruction test would keep passing while the labels described a
+    world that never existed.
+    """
+    positions = np.array([[10.0, 10.0],
+                          [15.0, 10.0]])
+    velocities = np.array([[1.0, 0.0],
+                           [-1.0, 0.0]])
+    positions_before = positions.copy()
+    velocities_before = velocities.copy()
+
+    step(positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, MAX_SPEED)
+
+    np.testing.assert_array_equal(positions, positions_before)
+    np.testing.assert_array_equal(velocities, velocities_before)

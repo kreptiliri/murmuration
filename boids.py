@@ -10,7 +10,7 @@ def get_torus(pos_a,pos_b,bounds):
 
         
 
-def calculate_separation(boid_id, positions, separation_radius, bounds):
+def calculate_separation(boid_id, positions, separation_radius,bounds, sep_force_cap=1.0):
     my_pos = positions[boid_id]
     total_force = np.zeros(2)
     neighbor_count = 0
@@ -22,7 +22,8 @@ def calculate_separation(boid_id, positions, separation_radius, bounds):
         if 0 < dist < separation_radius:
             #direction vector would be pointing directly away from neighbor
             direction = offset / dist
-            force_magnitude = 1.0 / dist
+            # clamp the magnitude expression only dist stays not modified so `direction` remains a true unit vector for labeling
+            force_magnitude = min(1.0 / dist, sep_force_cap) #max is mathematically equivalent to 1/d law as well.
             total_force += direction * force_magnitude
             neighbor_count += 1 
     if neighbor_count == 0:
@@ -31,14 +32,14 @@ def calculate_separation(boid_id, positions, separation_radius, bounds):
 
 def velocity_capper(old_velocity, max_speed):
     speed = np.linalg.norm(old_velocity)
-    if speed > max_speed and speed > 0:
+    if speed > max_speed:
         return (old_velocity/speed) * max_speed
     return old_velocity
-def step(positions, velocities, dt, separation_radius, bounds, max_speed,w_sep=1.5, w_ali=1.0, w_coh=0.3):
+def step(positions, velocities, dt, separation_radius, bounds, max_speed, sep_force_cap=1.0,w_sep=1.5, w_ali=1.0, w_coh=0.3):
     N = len(positions) #this gets birds count
     sep_forces = np.zeros((N, 2))
     for i in range(N): #gets each birds sep_force
-        sep_forces[i] = calculate_separation(i, positions, separation_radius, bounds)
+        sep_forces[i] = calculate_separation(i, positions, separation_radius, bounds, sep_force_cap)
     forces = {
     "separation": sep_forces * w_sep,
     "alignment": np.zeros((N, 2)), #future use
