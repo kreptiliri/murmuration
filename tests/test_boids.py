@@ -5,16 +5,32 @@ silent error here corrupts every downstream result without raising anything.
 That is what this file exists to prevent.
 """
 
+from dataclasses import FrozenInstanceError, replace
+
 import numpy as np
 import pytest
 
-from boids import calculate_separation, get_torus, step, velocity_capper
+from boids import (Physics, calculate_alignment, calculate_separation,
+                   get_torus, step, velocity_capper)
 
 # Every test in this file runs in a 100x100 torus.
 BOUNDS = 100.0
 SEPARATION_RADIUS = 20.0
+ALIGNMENT_RADIUS = 35.0
 MAX_SPEED = 5.0
 DT = 0.1
+
+# The baseline configuration every step() test starts from. Tests that need to
+# vary one constant use dataclasses.replace(PHYSICS, thing=...), which changes
+# that field and nothing else - so a test can never silently disagree with the
+# baseline about the other nine.
+PHYSICS = Physics(
+    dt=DT,
+    bounds=BOUNDS,
+    max_speed=MAX_SPEED,
+    separation_radius=SEPARATION_RADIUS,
+    alignment_radius=ALIGNMENT_RADIUS,
+)
 
 
 # --- get_torus ---------------------------------------------------------------
@@ -281,9 +297,7 @@ def test_recorded_forces_reconstruct_the_velocity_update():
                            [-1.0, 0.0],
                            [0.5, 0.5]])
 
-    _, new_velocities, forces = step(
-        positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, MAX_SPEED
-    )
+    _, new_velocities, forces = step(positions, velocities, PHYSICS)
 
     for i in range(len(positions)):
         np.testing.assert_allclose(
@@ -311,7 +325,7 @@ def test_reconstruction_holds_when_the_speed_cap_fires():
                            [0.5, 0.5]])
 
     _, new_velocities, forces = step(
-        positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, max_speed
+        positions, velocities, replace(PHYSICS, max_speed=max_speed)
     )
 
     # Guard the test's own premise: if the cap never fires this proves nothing.
@@ -345,9 +359,7 @@ def test_positions_stay_inside_the_world():
     velocities = np.array([[10.0, 0.0],
                            [0.0, 10.0]])
 
-    new_positions, _, _ = step(
-        positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, MAX_SPEED
-    )
+    new_positions, _, _ = step(positions, velocities, PHYSICS)
 
     assert np.all(new_positions >= 0.0)
     assert np.all(new_positions < BOUNDS)
@@ -424,10 +436,8 @@ def test_step_reads_the_separation_weight():
 
     raw = calculate_separation(0, positions, SEPARATION_RADIUS, BOUNDS)
 
-    _, _, forces_1x = step(positions, velocities, DT, SEPARATION_RADIUS,
-                           BOUNDS, MAX_SPEED, w_sep=1.0)
-    _, _, forces_2x = step(positions, velocities, DT, SEPARATION_RADIUS,
-                           BOUNDS, MAX_SPEED, w_sep=2.0)
+    _, _, forces_1x = step(positions, velocities, replace(PHYSICS, w_sep=1.0))
+    _, _, forces_2x = step(positions, velocities, replace(PHYSICS, w_sep=2.0))
 
     # weight 1.0 must leave the raw force untouched: it multiplies, not adds
     np.testing.assert_allclose(forces_1x["separation"][0], raw)
@@ -448,10 +458,10 @@ def test_step_reads_the_separation_force_cap():
                           [10.5, 50.0]])   # d = 0.5, uncapped magnitude 2.0
     velocities = np.zeros((2, 2))
 
-    _, _, tight = step(positions, velocities, DT, SEPARATION_RADIUS,
-                       BOUNDS, MAX_SPEED, sep_force_cap=1.0, w_sep=1.0)
-    _, _, loose = step(positions, velocities, DT, SEPARATION_RADIUS,
-                       BOUNDS, MAX_SPEED, sep_force_cap=10.0, w_sep=1.0)
+    _, _, tight = step(positions, velocities,
+                       replace(PHYSICS, sep_force_cap=1.0, w_sep=1.0))
+    _, _, loose = step(positions, velocities,
+                       replace(PHYSICS, sep_force_cap=10.0, w_sep=1.0))
 
     np.testing.assert_allclose(tight["separation"][0], [-1.0, 0.0])
     np.testing.assert_allclose(loose["separation"][0], [-2.0, 0.0])
@@ -471,9 +481,7 @@ def test_positions_wrap_the_lower_seam():
     positions = np.array([[0.1, 50.0]])
     velocities = np.array([[-10.0, 0.0]])   # capped to -5.0, so -0.5 per tick
 
-    new_positions, _, _ = step(
-        positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, MAX_SPEED
-    )
+    new_positions, _, _ = step(positions, velocities, PHYSICS)
 
     np.testing.assert_allclose(new_positions[0], [99.6, 50.0])
     assert np.all(new_positions >= 0.0)
@@ -496,7 +504,182 @@ def test_step_does_not_mutate_its_inputs():
     positions_before = positions.copy()
     velocities_before = velocities.copy()
 
-    step(positions, velocities, DT, SEPARATION_RADIUS, BOUNDS, MAX_SPEED)
+    step(positions, velocities, PHYSICS)
 
     np.testing.assert_array_equal(positions, positions_before)
     np.testing.assert_array_equal(velocities, velocities_before)
+
+
+# --- alignment ---------------------------------------------------------------
+
+def test_alignment_steers_toward_the_neighbour_mean():
+    """Three birds in a tight cluster, all headed differently.
+
+    Bird 0 sees velocities [0,1] and [-1,0], mean [-0.5, 0.5], and is itself
+    doing [1,0]. The steering force is the difference: [-1.5, 0.5].
+    """
+    positions = np.array([[50.0, 50.0],
+                          [52.0, 50.0],
+                          [54.0, 50.0]])
+    velocities = np.array([[1.0, 0.0],
+                           [0.0, 1.0],
+                           [-1.0, 0.0]])
+
+    force = calculate_alignment(0, positions, velocities, ALIGNMENT_RADIUS, BOUNDS)
+
+    np.testing.assert_allclose(force, [-1.5, 0.5])
+
+
+def test_alignment_switches_off_when_the_flock_already_matches():
+    """The trap this rule exists around.
+
+    Returning the raw neighbour mean instead of the difference from your own
+    velocity gives an already-aligned flock a permanent force of [3,0] - it
+    would accelerate forever into the speed cap and never settle. A matched
+    flock must feel nothing.
+    """
+    positions = np.array([[50.0, 50.0],
+                          [52.0, 50.0],
+                          [54.0, 50.0]])
+    velocities = np.array([[3.0, 0.0],
+                           [3.0, 0.0],
+                           [3.0, 0.0]])
+
+    force = calculate_alignment(0, positions, velocities, ALIGNMENT_RADIUS, BOUNDS)
+
+    np.testing.assert_allclose(force, [0.0, 0.0], atol=1e-12)
+
+
+def test_alignment_ignores_distance_inside_the_radius():
+    """No 1/d falloff - that is separation's law, not this one.
+
+    A neighbour at d = 5 and the same neighbour at d = 30 must produce an
+    identical force. This is what catches alignment written by copy-pasting
+    calculate_separation and forgetting to strip the distance weighting.
+    """
+    velocities = np.array([[1.0, 0.0],
+                           [0.0, 1.0]])
+    near = np.array([[50.0, 50.0], [55.0, 50.0]])   # d = 5
+    far = np.array([[50.0, 50.0], [80.0, 50.0]])    # d = 30, still inside 35
+
+    force_near = calculate_alignment(0, near, velocities, ALIGNMENT_RADIUS, BOUNDS)
+    force_far = calculate_alignment(0, far, velocities, ALIGNMENT_RADIUS, BOUNDS)
+
+    np.testing.assert_allclose(force_near, [-1.0, 1.0])
+    np.testing.assert_allclose(force_far, force_near)
+
+
+def test_alignment_selects_neighbours_by_position_not_velocity():
+    """Regression test for a real bug: `enumerate(velocities)`.
+
+    Iterating the wrong array made `neighbor_pos` a velocity, so the radius
+    check measured the distance from a position at [50,50] to a point at
+    [0,1] - about 70 units, outside every sane radius. Every bird's alignment
+    force came out as exactly [0,0], in every flock, and nothing raised: the
+    summation line indexed `velocities[i]` correctly, so the function was
+    averaging a legitimate set of velocities. Just the empty one.
+    """
+    positions = np.array([[50.0, 50.0],
+                          [52.0, 50.0]])       # 2 units apart, plainly neighbours
+    velocities = np.array([[1.0, 0.0],
+                           [0.0, 1.0]])        # 70 units apart as coordinates
+
+    force = calculate_alignment(0, positions, velocities, ALIGNMENT_RADIUS, BOUNDS)
+
+    np.testing.assert_allclose(force, [-1.0, 1.0])
+    assert np.linalg.norm(force) > 0, (
+        "zero force for adjacent birds means neighbours were selected by "
+        "velocity rather than by position"
+    )
+
+
+def test_alignment_neighbour_across_the_seam_counts():
+    """x = 2 and x = 98 are 4 units apart on a torus, not 96."""
+    positions = np.array([[2.0, 50.0],
+                          [98.0, 50.0]])
+    velocities = np.array([[1.0, 0.0],
+                           [0.0, 2.0]])
+
+    force = calculate_alignment(0, positions, velocities, ALIGNMENT_RADIUS, BOUNDS)
+
+    np.testing.assert_allclose(force, [-1.0, 2.0])
+
+
+def test_alignment_isolated_bird_feels_nothing():
+    """No neighbours means no force - not minus its own velocity.
+
+    A lone bird coasts. Returning `-my_v` for an empty neighbourhood would
+    make emptiness act as a brake, which is a different rule than the one
+    being modelled.
+    """
+    positions = np.array([[10.0, 10.0],
+                          [50.0, 50.0]])   # torus distance 56.6, outside 35
+    velocities = np.array([[4.0, 4.0],
+                           [0.0, -1.0]])
+
+    force = calculate_alignment(0, positions, velocities, ALIGNMENT_RADIUS, BOUNDS)
+
+    assert not np.isnan(force).any()
+    np.testing.assert_array_equal(force, [0.0, 0.0])
+
+
+# --- step: the alignment constants are actually read -------------------------
+
+def test_step_reads_the_alignment_weight():
+    positions = np.array([[50.0, 50.0],
+                          [52.0, 50.0]])
+    velocities = np.array([[1.0, 0.0],
+                           [0.0, 1.0]])
+
+    _, _, forces_1x = step(positions, velocities, replace(PHYSICS, w_ali=1.0))
+    _, _, forces_2x = step(positions, velocities, replace(PHYSICS, w_ali=2.0))
+
+    np.testing.assert_allclose(forces_1x["alignment"][0], [-1.0, 1.0])
+    np.testing.assert_allclose(forces_2x["alignment"][0],
+                               2.0 * forces_1x["alignment"][0])
+
+
+def test_step_reads_the_alignment_radius():
+    """The same pair of birds, neighbours under one radius and not the other."""
+    positions = np.array([[50.0, 50.0],
+                          [80.0, 50.0]])   # d = 30
+    velocities = np.array([[1.0, 0.0],
+                           [0.0, 1.0]])
+
+    _, _, wide = step(positions, velocities, replace(PHYSICS, alignment_radius=35.0))
+    _, _, narrow = step(positions, velocities, replace(PHYSICS, alignment_radius=10.0))
+
+    np.testing.assert_allclose(wide["alignment"][0], [-1.0, 1.0])
+    np.testing.assert_allclose(narrow["alignment"][0], [0.0, 0.0])
+
+
+# --- Physics ------------------------------------------------------------------
+
+def test_physics_is_immutable():
+    """A rollout must not be able to change the physics halfway through."""
+    physics = Physics()
+
+    with pytest.raises(FrozenInstanceError):
+        physics.dt = 0.2
+
+
+def test_physics_rejects_a_radius_at_or_beyond_half_the_world():
+    """The minimum-image convention returns at most bounds/2 along each axis.
+
+    A radius beyond that makes every bird a neighbour along that axis, so the
+    rule stops being local while still producing entirely plausible numbers.
+    """
+    with pytest.raises(ValueError, match="alignment_radius"):
+        Physics(bounds=100.0, alignment_radius=50.0)
+
+    with pytest.raises(ValueError, match="separation_radius"):
+        Physics(bounds=100.0, separation_radius=60.0)
+
+
+def test_physics_rejects_nonsense_scales():
+    with pytest.raises(ValueError):
+        Physics(bounds=-1.0)
+    with pytest.raises(ValueError):
+        Physics(dt=0.0)
+    with pytest.raises(ValueError):
+        Physics(max_speed=-5.0)
