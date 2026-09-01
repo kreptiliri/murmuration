@@ -294,9 +294,11 @@ def test_speed_stays_between_the_floor_and_the_cap_on_every_tick():
 def test_the_shipped_defaults_produce_a_sane_rollout():
     """Physics() with no arguments is what a careless caller gets.
 
-    Every other test overrides the defaults - the baseline pins min_speed=0.0
-    and alignment_radius=35.0 where the dataclass ships 2.0 and 30.0 - so the
-    values in boids.py were, until now, exercised by nothing at all.
+    Since world.py began deriving from Physics() this is nearly what
+    PHYSICS_CRUISING already is, so the gap this test was written to cover has
+    mostly closed. It stays because it constructs Physics() literally: if a
+    future default were changed without world.py being re-read, this is the
+    test that runs against the new value rather than a remembered one.
     """
     physics = Physics()
     positions, velocities = random_flock(seed=13, n_birds=N_BIRDS)

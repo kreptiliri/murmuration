@@ -1,13 +1,14 @@
 """The primitives every rule is built on: torus distance, the speed cap,
 and the Physics config object's own validation."""
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, asdict
 
 import numpy as np
 import pytest
 
 from boids import Physics, get_torus, velocity_capper
-from world import BOUNDS, MAX_SPEED, MIN_SPEED
+from world import (ALIGNMENT_RADIUS, BOUNDS, COHESION_RADIUS, DT, MAX_SPEED,
+                   MIN_SPEED, PHYSICS, PHYSICS_CRUISING, SEPARATION_RADIUS)
 
 
 def test_short_delta_passes_through_untouched():
@@ -205,3 +206,39 @@ def test_physics_rejects_a_floor_above_the_cap():
         Physics(min_speed=6.0, max_speed=5.0)
     with pytest.raises(ValueError):
         Physics(min_speed=-1.0)
+
+
+def test_the_test_baseline_tracks_the_shipped_config():
+    """world.py must derive from boids.py, not restate it.
+
+    These two files once declared the same constants independently and drifted:
+    alignment_radius was 35.0 in world.py against 30.0 in boids.py, and during a
+    planning session a measurement taken with one was reported alongside the
+    other. Deriving makes that impossible, and this asserts the derivation
+    rather than trusting it - if anyone reintroduces a literal, the two configs
+    can differ again and this is what notices.
+
+    PHYSICS_CRUISING is the shipped config verbatim. PHYSICS is the same world
+    with the speed floor switched off, and that is the *only* difference.
+    """
+    assert PHYSICS_CRUISING == Physics(), (
+        "PHYSICS_CRUISING must be boids.py's Physics() unchanged")
+
+    shipped, baseline = asdict(Physics()), asdict(PHYSICS)
+    differing = {k for k in shipped if shipped[k] != baseline[k]}
+    assert differing == {"min_speed"}, (
+        f"the test baseline differs from the shipped config in {differing}, "
+        "but min_speed is the only difference it is allowed to have"
+    )
+
+    # And the module-level names must be the config's own values, not copies.
+    # Checking only the Physics objects leaves the original bug available: a
+    # literal reintroduced here would disagree with PHYSICS.alignment_radius
+    # while both objects stayed correct. A mutation test found exactly that
+    # hole in the first version of this test.
+    assert (BOUNDS, SEPARATION_RADIUS, ALIGNMENT_RADIUS,
+            COHESION_RADIUS, MAX_SPEED, DT) == (
+        PHYSICS.bounds, PHYSICS.separation_radius, PHYSICS.alignment_radius,
+        PHYSICS.cohesion_radius, PHYSICS.max_speed, PHYSICS.dt), (
+        "a world.py constant has been restated as a literal instead of derived")
+    assert MIN_SPEED == PHYSICS_CRUISING.min_speed

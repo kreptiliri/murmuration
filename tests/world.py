@@ -1,9 +1,8 @@
 """The world every test in this suite runs in.
 
-Shared so that the five test modules cannot drift into disagreeing about the
-size of the world or how fast a bird may fly. Tests that need to vary one
-constant use dataclasses.replace(PHYSICS, thing=...), which changes that field
-and leaves the other nine exactly as they are here.
+Every constant here derives from boids.py's Physics() rather than being
+restated, so the test suite and the simulator cannot disagree about the size of
+the world or how fast a bird may fly. There is one declaration, in boids.py.
 """
 
 from dataclasses import replace
@@ -12,30 +11,28 @@ import numpy as np
 
 from boids import Physics
 
-# a 100x100 torus
-BOUNDS = 100.0
-SEPARATION_RADIUS = 20.0
-ALIGNMENT_RADIUS = 35.0
-COHESION_RADIUS = 40.0
-MAX_SPEED = 5.0
-MIN_SPEED = 2.0
-DT = 0.1
+# PHYSICS_CRUISING is the shipped configuration, taken from boids.py rather
+# than restated here. Everything below derives from it.
+#
+# The previous version declared BOUNDS, ALIGNMENT_RADIUS and the rest as
+# literals and fed them back into Physics(...), which is a second source of
+# truth for the same quantities - and they had already drifted apart, with
+# alignment_radius 35.0 here against 30.0 in boids.py. Deriving makes that
+# class of divergence impossible rather than merely fixing today's instance.
+PHYSICS_CRUISING = Physics()
 
-# The baseline pins min_speed=0.0 - no floor - so that every test written
+# The same world with the speed floor switched off, so that every test written
 # before the floor existed still means exactly what it meant then. Tests that
-# want the floor use PHYSICS_CRUISING, or replace(PHYSICS, min_speed=...).
-PHYSICS = Physics(
-    dt=DT,
-    bounds=BOUNDS,
-    max_speed=MAX_SPEED,
-    min_speed=0.0,
-    separation_radius=SEPARATION_RADIUS,
-    alignment_radius=ALIGNMENT_RADIUS,
-    cohesion_radius=COHESION_RADIUS,
-)
+# vary one constant use dataclasses.replace(PHYSICS, thing=...).
+PHYSICS = replace(PHYSICS_CRUISING, min_speed=0.0)
 
-# The same world with the speed floor switched on.
-PHYSICS_CRUISING = replace(PHYSICS, min_speed=MIN_SPEED)
+BOUNDS = PHYSICS.bounds
+SEPARATION_RADIUS = PHYSICS.separation_radius
+ALIGNMENT_RADIUS = PHYSICS.alignment_radius
+COHESION_RADIUS = PHYSICS.cohesion_radius
+MAX_SPEED = PHYSICS.max_speed
+MIN_SPEED = PHYSICS_CRUISING.min_speed
+DT = PHYSICS.dt
 
 
 def random_flock(seed, n_birds):

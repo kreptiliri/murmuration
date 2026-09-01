@@ -13,4 +13,4 @@ temp.txt
 .pytest_cache/
 
 # scratch views, not deliverables
-scratch_*.py
+scratch_*

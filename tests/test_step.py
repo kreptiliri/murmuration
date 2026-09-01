@@ -174,13 +174,18 @@ def test_step_reads_the_alignment_weight():
                                2.0 * forces_1x["alignment"][0])
 
 def test_step_reads_the_alignment_radius():
-    """The same pair of birds, neighbours under one radius and not the other."""
+    """The same pair of birds, neighbours under one radius and not the other.
+
+    The wide case is PHYSICS itself rather than a hardcoded radius, so this
+    tests the configured value rather than an arbitrary number that happens to
+    exceed 25.
+    """
     positions = np.array([[50.0, 50.0],
-                          [80.0, 50.0]])   # d = 30
+                          [75.0, 50.0]])   # d = 25, inside the configured 30
     velocities = np.array([[1.0, 0.0],
                            [0.0, 1.0]])
 
-    _, _, wide = step(positions, velocities, replace(PHYSICS, alignment_radius=35.0))
+    _, _, wide = step(positions, velocities, PHYSICS)
     _, _, narrow = step(positions, velocities, replace(PHYSICS, alignment_radius=10.0))
 
     np.testing.assert_allclose(wide["alignment"][0], [-1.0, 1.0])

@@ -45,14 +45,18 @@ def test_alignment_switches_off_when_the_flock_already_matches():
 def test_alignment_ignores_distance_inside_the_radius():
     """No 1/d falloff - that is separation's law, not this one.
 
-    A neighbour at d = 5 and the same neighbour at d = 30 must produce an
+    A neighbour at d = 5 and the same neighbour at d = 25 must produce an
     identical force. This is what catches alignment written by copy-pasting
     calculate_separation and forgetting to strip the distance weighting.
+
+    The far distance is 25 rather than 30 because ALIGNMENT_RADIUS now derives
+    from boids.py and is 30.0; the comparison is a strict <, so a neighbour at
+    exactly 30 would fall outside and this would be testing nothing.
     """
     velocities = np.array([[1.0, 0.0],
                            [0.0, 1.0]])
     near = np.array([[50.0, 50.0], [55.0, 50.0]])   # d = 5
-    far = np.array([[50.0, 50.0], [80.0, 50.0]])    # d = 30, still inside 35
+    far = np.array([[50.0, 50.0], [75.0, 50.0]])    # d = 25, inside 30
 
     force_near = calculate_alignment(0, near, velocities, ALIGNMENT_RADIUS, BOUNDS)
     force_far = calculate_alignment(0, far, velocities, ALIGNMENT_RADIUS, BOUNDS)

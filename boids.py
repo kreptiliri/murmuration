@@ -9,7 +9,7 @@ class Physics:
     dt: float = 0.1
     bounds: float = 100.0
     max_speed: float = 5.0
-    min_speed: float = 2.0 #i am not sure yet
+    min_speed: float = 2.0 
     separation_radius: float = 20.0
     alignment_radius: float = 30.0   #a placeholder for future use
     cohesion_radius: float = 40.0
@@ -38,7 +38,7 @@ class Physics:
 
 def get_torus(pos_a,pos_b,bounds):
     delta = pos_a - pos_b
-    #confusing, it looks like a congruence to b over bound
+    
     delta = (delta + bounds/2) % bounds - bounds/2
     return delta
 
@@ -51,7 +51,7 @@ def calculate_separation(boid_id, positions, separation_radius,bounds, sep_force
     for i,neighbor_pos in enumerate(positions):
         if i == boid_id:
              continue
-        offset = get_torus(my_pos,neighbor_pos,bounds) #what, nvm this should be looped
+        offset = get_torus(my_pos,neighbor_pos,bounds) 
         dist = np.linalg.norm(offset)
         if 0 < dist < separation_radius:
             #direction vector would be pointing directly away from neighbor
@@ -115,7 +115,7 @@ def step(positions, velocities, physics):
     bounds = physics.bounds
     max_speed = physics.max_speed
     min_speed = physics.min_speed
-    N = len(positions) #this gets birds count
+    N = len(positions) 
     sep_forces = np.zeros((N, 2))
     ali_forces = np.zeros((N, 2))
     coh_forces = np.zeros((N,2))
