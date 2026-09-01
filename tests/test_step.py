@@ -377,3 +377,109 @@ def test_recorded_forces_match_the_rules_applied_to_the_input_state():
     # premise guard: a frozen flock would satisfy all of the above trivially
     for rule in ("separation", "alignment", "cohesion"):
         assert np.linalg.norm(forces[rule], axis=1).max() > 0, f"{rule} never fired"
+
+
+# --- dtype: what survives being written to disk and read back ----------------
+
+def test_step_accepts_integer_input_without_truncating():
+    """Integer positions must not quantise the world to a lattice.
+
+    `np.zeros_like(positions)` without `dtype=float` inherits int64 from an
+    integer input, and every position then rounds to a whole number on every
+    tick. Birds would snap to a 1x1 grid, all three rules would be computed
+    from quantised distances, and nothing would raise - the flock would simply
+    be wrong in a way that looks like a rendering choice.
+    """
+    positions = np.array([[10, 10], [15, 10], [80, 80]])
+    velocities = np.array([[1, 0], [-1, 0], [0, 1]])
+    assert positions.dtype == np.int64 and velocities.dtype == np.int64
+
+    new_positions, new_velocities, forces = step(positions, velocities, PHYSICS)
+
+    assert new_positions.dtype == np.float64
+    assert new_velocities.dtype == np.float64
+    # bird 0 moves 1.0 * dt = 0.1 in x, plus a small push from its neighbour
+    assert new_positions[0][0] != int(new_positions[0][0]), (
+        "position landed on a whole number: the output array inherited an "
+        "integer dtype and the world has been quantised"
+    )
+
+
+def test_step_always_computes_in_float64():
+    """float32 in, float64 out - deliberately.
+
+    The dataset will be stored as float32 to keep it small, but the simulation
+    itself should not inherit that precision from whatever it was handed. This
+    pins the promotion so a future refactor cannot quietly make the physics
+    depend on the caller's dtype.
+    """
+    positions, velocities = random_flock(seed=0, n_birds=10)
+    positions, velocities = positions.astype(np.float32), velocities.astype(np.float32)
+
+    new_positions, new_velocities, forces = step(positions, velocities, PHYSICS_CRUISING)
+
+    assert new_positions.dtype == np.float64
+    assert new_velocities.dtype == np.float64
+    for rule, force in forces.items():
+        assert force.dtype == np.float64, f"{rule} came back as {force.dtype}"
+
+
+def test_the_reconstruction_invariant_is_exact_in_float64():
+    """Not approximately equal - bit for bit identical.
+
+    Every other reconstruction test allows a tolerance. Measured over 200 ticks
+    of a real flock the error is exactly zero, because `step` and the
+    reconstruction perform the same operations in the same order on the same
+    float64 values. Asserting equality rather than closeness means any future
+    reordering that introduces rounding shows up here first, while it is still
+    one line of blame rather than a drift in a trained result.
+    """
+    physics = PHYSICS_CRUISING
+    positions, velocities = random_flock(seed=3, n_birds=15)
+
+    for tick in range(50):
+        old_velocities = velocities.copy()
+        positions, velocities, forces = step(positions, velocities, physics)
+        total = forces["separation"] + forces["alignment"] + forces["cohesion"]
+
+        for i in range(len(positions)):
+            np.testing.assert_array_equal(
+                velocity_capper(old_velocities[i] + total[i] * physics.dt,
+                                physics.max_speed, physics.min_speed),
+                velocities[i],
+                err_msg=f"reconstruction is no longer exact for bird {i} at tick {tick}")
+
+
+def test_the_reconstruction_invariant_survives_float32_storage():
+    """What the invariant is actually worth once the labels are on disk.
+
+    The dataset stores velocities and forces as float32. Reading them back and
+    re-deriving the velocity update can no longer be exact - measured worst
+    case 2.9e-07, about 2.4x float32 epsilon. Anything materially larger than
+    that means precision is being lost somewhere other than the cast, and a
+    test asserting exact equality against reloaded data would fail for a reason
+    that has nothing to do with the simulator.
+    """
+    physics = PHYSICS_CRUISING
+    positions, velocities = random_flock(seed=3, n_birds=15)
+    worst = 0.0
+
+    for _ in range(100):
+        old_velocities = velocities.copy()
+        positions, velocities, forces = step(positions, velocities, physics)
+        total = forces["separation"] + forces["alignment"] + forces["cohesion"]
+
+        def stored(a):                      # write to disk as float32, read back
+            return a.astype(np.float32).astype(np.float64)
+
+        rebuilt = np.array([
+            velocity_capper(stored(old_velocities)[i] + stored(total)[i] * physics.dt,
+                            physics.max_speed, physics.min_speed)
+            for i in range(len(positions))])
+        worst = max(worst, np.abs(rebuilt - stored(velocities)).max())
+
+    assert worst < 1e-6, f"float32 round trip lost {worst:.3e}, more than the cast alone"
+    assert worst > 0.0, (
+        "premise failed: the float32 round trip was lossless, so this test did "
+        "not exercise the precision loss it exists to bound"
+    )

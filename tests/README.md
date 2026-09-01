@@ -1,6 +1,6 @@
 # The test suite
 
-60 tests, ~3 seconds. `pytest -q` from the repo root.
+80 tests, ~6 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -9,20 +9,24 @@ plausible numbers, no exception, no NaN — rather than crashes.
 
 Every test below has been checked by mutation: the bug it claims to catch was
 introduced into `boids.py` deliberately, and the test failed. A test nobody has
-watched fail is a test nobody has tested.
+watched fail is a test nobody has tested. Five of them were written because they
+caught a real bug in real code, and those are marked.
 
 | file | what it covers | tests |
 |---|---|---|
-| `test_geometry.py` | torus distance, the speed cap, `Physics` validation | 12 |
+| `test_geometry.py` | torus distance, the two-sided speed clamp, `Physics` validation | 20 |
 | `test_separation.py` | `calculate_separation` | 10 |
 | `test_alignment.py` | `calculate_alignment` | 6 |
 | `test_cohesion.py` | `calculate_cohesion` | 11 |
-| `test_step.py` | one tick: the integrator and the reconstruction invariant | 12 |
-| `test_rollout.py` | hundreds of ticks: what only shows up over time | 9 |
+| `test_step.py` | one tick: the integrator, the constants, the label invariants | 20 |
+| `test_rollout.py` | hundreds of ticks: what only shows up over time | 13 |
 
-`world.py` holds the shared constants and the `PHYSICS` baseline, so the six
-files cannot drift into disagreeing about the size of the world. Tests that
-vary one constant use `dataclasses.replace(PHYSICS, thing=...)`.
+`world.py` holds the shared constants and two baselines, so the six files cannot
+drift into disagreeing about the size of the world. `PHYSICS` pins
+`min_speed=0.0` — no floor — so that every test written before the floor existed
+still means exactly what it meant then; `PHYSICS_CRUISING` is the same world with
+the floor on. Tests that vary one constant use
+`dataclasses.replace(PHYSICS, thing=...)`.
 
 ---
 
@@ -41,8 +45,16 @@ The primitives every rule is built on.
 | `capper_shortens_the_arrow_without_turning_it` | `return max_speed` — a scalar broadcast into a vector slot, giving speed 7.07 and the wrong heading |
 | `capper_leaves_velocity_exactly_at_the_cap` | an off-by-one on `>` vs `>=` |
 | `capper_handles_a_motionless_bird` | division by zero speed → silent NaN |
+| `floor_raises_a_slow_velocity_without_turning_it` | a floor that rotates instead of rescaling |
+| `floor_leaves_a_fast_enough_velocity_untouched` | a floor that always fires |
+| `floor_leaves_velocity_exactly_at_the_floor` | the strict `<` at the boundary |
+| `floor_leaves_a_motionless_bird_at_rest` | rescaling a zero vector → NaN. Measured: speed is exactly zero **iff** a bird has no neighbour in any radius *and* started at rest, which never happens at ten birds or more |
+| `a_floor_of_zero_disables_it` | `min_speed = 0` must reproduce the pre-floor behaviour |
+| `floor_equal_to_cap_gives_constant_speed` | the self-propelled-particle setup, where every bird flies at exactly one speed |
 | `physics_is_immutable` | physics changing halfway through a rollout |
 | `physics_rejects_a_radius_at_or_beyond_half_the_world` | a radius past `bounds/2`, where minimum-image stops distinguishing near from far and the local rules quietly go global |
+| `physics_allows_a_floor_of_zero_and_a_floor_equal_to_the_cap` | over-strict validation: both endpoints are legal and both are useful |
+| `physics_rejects_a_floor_above_the_cap` | a clamp with no satisfiable range |
 | `physics_rejects_nonsense_scales` | negative or zero `bounds`, `dt`, `max_speed` |
 
 ## test_separation.py
@@ -85,7 +97,7 @@ Steer toward the local centre of mass. The most dangerous rule to get wrong.
 | `cohesion_averages_offsets_not_positions` | **the famous trap**: the mean of `x=1` and `x=99` is `50`, the far side of the world. Averaging positions gives a force in the opposite direction, 100× too strong, entirely plausible-looking |
 | `cohesion_neighbour_across_the_seam_counts` | the seam |
 | `cohesion_switches_off_at_the_centre_of_mass` | a rule that never reaches equilibrium |
-| `cohesion_is_small_just_off_the_centre` | normalising the mean to a unit vector — a bird 0.02 off centre would get a full-magnitude force, discontinuous, and its direction near a flock's centre is pure noise |
+| `cohesion_is_small_just_off_the_centre` | normalising the mean to a unit vector — a bird 0.02 off centre would get a full-magnitude force, discontinuous, and its direction near a flock's centre is mostly noise |
 | `cohesion_grows_linearly_with_displacement` | anything that isn't Hooke's law: normalisation, or an inherited `1/d` |
 | `cohesion_magnitude_never_reaches_one` | the bound that makes a force cap unnecessary here |
 | `cohesion_excludes_neighbours_outside_the_radius` | an out-of-range bird entering the average, and inflating the divisor |
@@ -95,12 +107,17 @@ Steer toward the local centre of mass. The most dangerous rule to get wrong.
 
 ## test_step.py
 
-One tick: the integrator, and the invariant this whole project rests on.
+One tick: the integrator, the constants, and the invariants the labels rest on.
 
 | test | catches |
 |---|---|
 | `recorded_forces_reconstruct_the_velocity_update` | **the load-bearing test.** If the recorded forces cannot reproduce the velocity update the simulator performed, they are not labels for this simulation. Guards its own premise by asserting all three rules actually fire |
-| `reconstruction_holds_when_the_speed_cap_fires` | the same invariant where it stops being a plain sum: `cap(v + Σf·dt) == v'` |
+| `reconstruction_holds_when_the_speed_cap_fires` | the same invariant where it stops being a plain sum: `clamp(v + Σf·dt) == v'` |
+| `recorded_forces_match_the_rules_applied_to_the_input_state` | **the strongest label assertion here.** Every bird's every force must equal its own rule at its own radius times its own weight, on the state passed *in* — which pins the labels to tick *t* rather than *t+1*. Nothing else can: forces computed from the updated positions still satisfy the reconstruction invariant |
+| `the_reconstruction_invariant_is_exact_in_float64` | rounding introduced by a reordering. Measured error is exactly zero, so this asserts equality, not closeness |
+| `the_reconstruction_invariant_survives_float32_storage` | precision lost somewhere other than the cast. Bounds the round-trip error at `1e-6`; measured `2.9e-07`, about 2.4× float32 epsilon |
+| `step_accepts_integer_input_without_truncating` | `np.zeros_like(positions)` inheriting int64 — every bird snaps to a 1×1 lattice every tick and the flock is wrong in a way that looks like a rendering choice |
+| `step_always_computes_in_float64` | physics silently inheriting the caller's precision |
 | `positions_stay_inside_the_world` | the upper seam |
 | `positions_wrap_the_lower_seam` | the lower seam — Python's `%` returns non-negative for a positive modulus, but C's `fmod` would leave `−0.4` here |
 | `step_reads_the_separation_weight` | **a real bug this caught**: deleting `* w_sep` passed all 20 tests that existed at the time. Unequal weights are what spread the three rules' acquisition times apart, so an ignored weight deletes the experiment's independent variable |
@@ -109,6 +126,9 @@ One tick: the integrator, and the invariant this whole project rests on.
 | `step_reads_the_alignment_radius` | the same hole for `alignment_radius` |
 | `step_reads_the_cohesion_weight` | the same hole for `w_coh` |
 | `step_reads_the_cohesion_radius` | the same hole for `cohesion_radius` |
+| `step_reads_the_min_speed` | the same hole for `min_speed` |
+| `step_reads_the_dt` | **a real gap a mutation audit found**: every test ran at `dt=0.1`, so a literal was indistinguishable from a read |
+| `step_reads_the_bounds` | **the same gap for `bounds`**: every test ran in a 100-wide world |
 | `step_does_not_mutate_its_inputs` | double-buffering: `positions %= bounds` done in place would compute some birds' forces against a half-updated world, and the reconstruction test would keep passing |
 | `step_records_all_three_rules_separately` | two keys holding the same array — probes trained to distinguish rules the simulator never separated |
 
@@ -121,9 +141,13 @@ Hundreds of ticks. A different class of bug lives here.
 | `no_nan_ever_appears` | a NaN born on tick 300 that propagates silently to the end of the run |
 | `positions_stay_inside_the_world_for_every_tick` | slow drift out of `[0, bounds)`, after which minimum-image is wrong for everything |
 | `speed_never_exceeds_the_cap` | the cap failing under accumulated force |
+| `speed_stays_between_the_floor_and_the_cap_on_every_tick` | either bound failing at any point in 500 ticks — and a bird stalling to exactly zero, which the floor cannot rescue |
 | `the_reconstruction_invariant_holds_on_every_tick` | the load-bearing invariant, for every bird on every tick of a real flock |
 | `the_reconstruction_invariant_holds_when_the_cap_fires_constantly` | the capped regime specifically — measured, a settled flock reaches its cap on 1 tick in 200, so an ordinary rollout barely tests it |
+| `the_reconstruction_invariant_holds_with_the_speed_floor` | the same invariant under the other clamp |
+| `a_cruising_flock_keeps_moving` | the reason the floor exists. Without it, alignment steers each bird toward its neighbours' mean *vector*, the mean of scattered vectors is short, and the flock organises its headings and brakes to a crawl in the same motion |
 | `the_flock_settles_rather_than_being_pinned_at_the_cap` | an integrator driving the flock instead of letting it settle |
 | `the_cohesion_spring_does_not_gain_energy` | plain forward Euler. Cohesion is Hooke's law, and forward Euler grows an oscillator's amplitude every period. `step` advances position with the **new** velocity — semi-implicit (symplectic) Euler — and that one line is what keeps the flock from shaking itself apart |
 | `a_rollout_is_reproducible` | non-determinism, which would make the dataset unregenerable from its own metadata |
 | `two_birds_beyond_every_radius_just_drift` | a rule firing when nothing is in range |
+| `the_shipped_defaults_produce_a_sane_rollout` | `Physics()` with no arguments — what a careless caller gets, and what every other test overrides |
