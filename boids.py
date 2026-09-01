@@ -11,7 +11,7 @@ class Physics:
     max_speed: float = 5.0
     min_speed: float = 2.0 
     separation_radius: float = 20.0
-    alignment_radius: float = 30.0   #a placeholder for future use
+    alignment_radius: float = 30.0   
     cohesion_radius: float = 40.0
     sep_force_cap: float = 1.0
     w_sep: float = 1.5
