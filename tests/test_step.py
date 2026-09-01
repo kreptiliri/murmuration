@@ -11,11 +11,13 @@ from dataclasses import replace
 
 import numpy as np
 
-from boids import calculate_separation, step, velocity_capper
-from world import BOUNDS, DT, MAX_SPEED, PHYSICS, SEPARATION_RADIUS
+from boids import (calculate_alignment, calculate_cohesion,
+                   calculate_separation, step, velocity_capper)
+from world import (BOUNDS, DT, MAX_SPEED, MIN_SPEED, PHYSICS,
+                   PHYSICS_CRUISING, SEPARATION_RADIUS, random_flock)
 
 
-def _reconstruct_velocity(velocities, forces, boid_id, dt, max_speed):
+def _reconstruct_velocity(velocities, forces, boid_id, physics):
     """Re-derive one bird's new velocity from the RECORDED forces alone.
 
     This is the whole point of the exercise: if the numbers stored in the
@@ -26,7 +28,8 @@ def _reconstruct_velocity(velocities, forces, boid_id, dt, max_speed):
     total = (forces["separation"][boid_id]
              + forces["alignment"][boid_id]
              + forces["cohesion"][boid_id])
-    return velocity_capper(velocities[boid_id] + total * dt, max_speed)
+    return velocity_capper(velocities[boid_id] + total * physics.dt,
+                           physics.max_speed, physics.min_speed)
 
 def test_recorded_forces_reconstruct_the_velocity_update():
     """The uncapped case: recorded forces sum straight to the velocity change."""
@@ -48,7 +51,7 @@ def test_recorded_forces_reconstruct_the_velocity_update():
 
     for i in range(len(positions)):
         np.testing.assert_allclose(
-            _reconstruct_velocity(velocities, forces, i, DT, MAX_SPEED),
+            _reconstruct_velocity(velocities, forces, i, PHYSICS),
             new_velocities[i],
             err_msg=f"recorded forces do not reproduce bird {i}'s velocity update",
         )
@@ -62,7 +65,7 @@ def test_reconstruction_holds_when_the_speed_cap_fires():
     the easy half and would pass against a simulator whose labels are wrong
     in exactly the regime where birds are moving fastest.
     """
-    max_speed = 0.5  # low enough that every bird below exceeds it
+    physics = replace(PHYSICS, max_speed=0.5)  # every bird below exceeds it
     positions = np.array([[10.0, 10.0],
                           [15.0, 10.0],
                           [80.0, 80.0]])
@@ -70,28 +73,26 @@ def test_reconstruction_holds_when_the_speed_cap_fires():
                            [-1.0, 0.0],
                            [0.5, 0.5]])
 
-    _, new_velocities, forces = step(
-        positions, velocities, replace(PHYSICS, max_speed=max_speed)
-    )
+    _, new_velocities, forces = step(positions, velocities, physics)
 
     # Guard the test's own premise: if the cap never fires this proves nothing.
     uncapped = np.array([
         velocities[i] + (forces["separation"][i]
                          + forces["alignment"][i]
-                         + forces["cohesion"][i]) * DT
+                         + forces["cohesion"][i]) * physics.dt
         for i in range(len(positions))
     ])
-    assert np.any(np.linalg.norm(uncapped, axis=1) > max_speed), (
+    assert np.any(np.linalg.norm(uncapped, axis=1) > physics.max_speed), (
         "premise failed: the cap never fired, so this test verifies nothing"
     )
 
     for i in range(len(positions)):
         np.testing.assert_allclose(
-            _reconstruct_velocity(velocities, forces, i, DT, max_speed),
+            _reconstruct_velocity(velocities, forces, i, physics),
             new_velocities[i],
             err_msg=f"reconstruction broke for bird {i} once the cap fired",
         )
-        assert np.linalg.norm(new_velocities[i]) <= max_speed + 1e-12
+        assert np.linalg.norm(new_velocities[i]) <= physics.max_speed + 1e-12
 
 def test_positions_stay_inside_the_world():
     """`pos %= bounds` every tick is the invariant get_torus depends on.
@@ -275,3 +276,104 @@ def test_step_records_all_three_rules_separately():
     assert not np.allclose(forces["separation"], forces["alignment"])
     assert not np.allclose(forces["separation"], forces["cohesion"])
     assert not np.allclose(forces["alignment"], forces["cohesion"])
+
+
+def test_step_reads_the_min_speed():
+    """A floor that step accepts and never forwards is invisible.
+
+    Two birds 70 units apart, outside every radius, so no rule fires and the
+    only thing that can change their velocity is the floor. With it off they
+    coast at speed 1; with it on they must be flying at min_speed.
+    """
+    positions = np.array([[10.0, 10.0], [60.0, 60.0]])
+    velocities = np.array([[1.0, 0.0], [-1.0, 0.0]])
+
+    _, drifting, _ = step(positions, velocities, PHYSICS)
+    _, cruising, _ = step(positions, velocities, PHYSICS_CRUISING)
+
+    np.testing.assert_allclose(drifting, velocities)
+    np.testing.assert_allclose(cruising, [[MIN_SPEED, 0.0], [-MIN_SPEED, 0.0]])
+
+
+def test_step_reads_the_dt():
+    """dt must reach both the velocity update and the position update.
+
+    Every other test in this suite runs at dt=0.1, so `step` ignoring
+    physics.dt and using the literal 0.1 was invisible until this existed. The
+    dataset config would then claim one timestep while the simulator ran
+    another, and every number in the file would look completely reasonable.
+    """
+    # neighbours in range, so the forces are non-zero and dt has to scale them
+    positions = np.array([[50.0, 50.0], [55.0, 50.0]])
+    velocities = np.zeros((2, 2))
+
+    p_slow, v_slow, f_slow = step(positions, velocities, replace(PHYSICS, dt=0.1))
+    p_fast, v_fast, f_fast = step(positions, velocities, replace(PHYSICS, dt=0.2))
+
+    # the forces themselves do not depend on dt - only how much of them is applied
+    np.testing.assert_allclose(f_slow["separation"], f_fast["separation"])
+    # twice the timestep, twice the velocity change from the same force
+    np.testing.assert_allclose(v_fast, 2.0 * v_slow)
+    # and the position update uses it too: dx = v_new * dt, so four times as far
+    np.testing.assert_allclose(p_fast - positions, 4.0 * (p_slow - positions))
+
+
+def test_step_reads_the_bounds():
+    """The world size must come from physics, not from a literal.
+
+    A single bird half a step from the seam of a 50-wide world. If `bounds`
+    were hardcoded to 100 it would sail past 50 and sit outside its own world,
+    where get_torus silently starts returning the wrong displacement for
+    everything.
+    """
+    small_world = replace(PHYSICS, bounds=50.0, separation_radius=20.0,
+                          alignment_radius=20.0, cohesion_radius=20.0)
+    positions = np.array([[49.9, 25.0]])
+    velocities = np.array([[5.0, 0.0]])
+
+    new_positions, _, _ = step(positions, velocities, small_world)
+
+    np.testing.assert_allclose(new_positions[0], [0.4, 25.0])
+
+
+def test_recorded_forces_match_the_rules_applied_to_the_input_state():
+    """The strongest statement this suite can make about the labels.
+
+    For every bird in a real flock, each recorded force must equal its own rule
+    function, at its own radius, times its own weight, evaluated on the state
+    that was passed *in*. That single assertion pins at once: the right rule in
+    the right key, the right constant reaching the right rule, bird i's force
+    stored at index i, and - the one nothing else covers - the labels
+    describing the world at tick t rather than the world at tick t+1.
+
+    That last one is the quietest possible label bug. Forces computed from the
+    updated positions would still satisfy the reconstruction invariant, because
+    that invariant only checks that the recorded numbers reproduce the velocity
+    update - not which world they were measured in.
+    """
+    physics = PHYSICS_CRUISING
+    positions, velocities = random_flock(seed=7, n_birds=12)
+
+    _, _, forces = step(positions, velocities, physics)
+
+    for i in range(len(positions)):
+        np.testing.assert_allclose(
+            forces["separation"][i],
+            physics.w_sep * calculate_separation(
+                i, positions, physics.separation_radius, physics.bounds,
+                physics.sep_force_cap),
+            err_msg=f"separation label wrong for bird {i}")
+        np.testing.assert_allclose(
+            forces["alignment"][i],
+            physics.w_ali * calculate_alignment(
+                i, positions, velocities, physics.alignment_radius, physics.bounds),
+            err_msg=f"alignment label wrong for bird {i}")
+        np.testing.assert_allclose(
+            forces["cohesion"][i],
+            physics.w_coh * calculate_cohesion(
+                i, positions, physics.cohesion_radius, physics.bounds),
+            err_msg=f"cohesion label wrong for bird {i}")
+
+    # premise guard: a frozen flock would satisfy all of the above trivially
+    for rule in ("separation", "alignment", "cohesion"):
+        assert np.linalg.norm(forces[rule], axis=1).max() > 0, f"{rule} never fired"

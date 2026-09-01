@@ -9,6 +9,7 @@ class Physics:
     dt: float = 0.1
     bounds: float = 100.0
     max_speed: float = 5.0
+    min_speed: float = 2.0 #i am not sure yet
     separation_radius: float = 20.0
     alignment_radius: float = 30.0   #a placeholder for future use
     cohesion_radius: float = 40.0
@@ -18,8 +19,10 @@ class Physics:
     w_coh: float = 0.3
 
     def __post_init__(self):
-        if self.bounds <= 0 or self.dt <= 0 or self.max_speed <= 0:
-            raise ValueError("bounds, dt and max_speed must all be positive")
+        if self.bounds <= 0 or self.dt <= 0 or self.max_speed <= 0 or self.min_speed < 0:
+            raise ValueError("bounds, dt, max_speed and min_speed must all be positive")
+        if self.min_speed > self.max_speed:
+            raise ValueError("min_speed cannot be greater than max_speed")
         #Minimum-image caps any axis-displacement at bounds/2, 
         #so neighbours beyond that distance are unreachable; a radius ≥ bounds/2 makes every bird a neighbour of every other, 
         #and the radius stops selecting anything
@@ -95,10 +98,13 @@ def calculate_cohesion(boid_id, positions, cohesion_radius, bounds):
     mean = total_force / neighbor_count
     return mean / cohesion_radius #smooth 0->1 vector, spring dynamics(no 1/d regime)
 
-def velocity_capper(old_velocity, max_speed):
+def velocity_capper(old_velocity, max_speed, min_speed=0.0):
     speed = np.linalg.norm(old_velocity)
     if speed > max_speed:
         return (old_velocity/speed) * max_speed
+    if 0 < speed < min_speed:
+        return (old_velocity/speed) * min_speed
+    #next tick gives nonzero velo
     return old_velocity
 def step(positions, velocities, physics):
     #Advance the world one tick.
@@ -108,6 +114,7 @@ def step(positions, velocities, physics):
     dt = physics.dt
     bounds = physics.bounds
     max_speed = physics.max_speed
+    min_speed = physics.min_speed
     N = len(positions) #this gets birds count
     sep_forces = np.zeros((N, 2))
     ali_forces = np.zeros((N, 2))
@@ -130,7 +137,7 @@ def step(positions, velocities, physics):
 
         v_raw = velocities[i] + (total_force * dt) #uncapped
         # FORCES ARE RECORDED PRECAP !!!!!!!!!!!!!!!!!!!!!!!!
-        new_velocities[i] = velocity_capper(v_raw, max_speed)
+        new_velocities[i] = velocity_capper(v_raw, max_speed, min_speed)
         new_positions[i] = positions[i] + new_velocities[i] * dt
 
     new_positions %= bounds

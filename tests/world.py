@@ -6,6 +6,8 @@ constant use dataclasses.replace(PHYSICS, thing=...), which changes that field
 and leaves the other nine exactly as they are here.
 """
 
+from dataclasses import replace
+
 import numpy as np
 
 from boids import Physics
@@ -16,16 +18,24 @@ SEPARATION_RADIUS = 20.0
 ALIGNMENT_RADIUS = 35.0
 COHESION_RADIUS = 40.0
 MAX_SPEED = 5.0
+MIN_SPEED = 2.0
 DT = 0.1
 
+# The baseline pins min_speed=0.0 - no floor - so that every test written
+# before the floor existed still means exactly what it meant then. Tests that
+# want the floor use PHYSICS_CRUISING, or replace(PHYSICS, min_speed=...).
 PHYSICS = Physics(
     dt=DT,
     bounds=BOUNDS,
     max_speed=MAX_SPEED,
+    min_speed=0.0,
     separation_radius=SEPARATION_RADIUS,
     alignment_radius=ALIGNMENT_RADIUS,
     cohesion_radius=COHESION_RADIUS,
 )
+
+# The same world with the speed floor switched on.
+PHYSICS_CRUISING = replace(PHYSICS, min_speed=MIN_SPEED)
 
 
 def random_flock(seed, n_birds):

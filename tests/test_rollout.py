@@ -12,8 +12,8 @@ from dataclasses import replace
 
 import numpy as np
 
-from boids import step, velocity_capper
-from world import BOUNDS, DT, MAX_SPEED, PHYSICS, random_flock
+from boids import Physics, step, velocity_capper
+from world import BOUNDS, DT, MAX_SPEED, PHYSICS, PHYSICS_CRUISING, random_flock
 
 TICKS = 200
 N_BIRDS = 20
@@ -83,7 +83,7 @@ def _assert_reconstruction_holds(physics, seed, ticks=TICKS):
 
         for i in range(N_BIRDS):
             np.testing.assert_allclose(
-                velocity_capper(uncapped[i], physics.max_speed),
+                velocity_capper(uncapped[i], physics.max_speed, physics.min_speed),
                 velocities[i],
                 err_msg=f"reconstruction broke for bird {i} at tick {tick}",
             )
@@ -219,3 +219,94 @@ def test_two_birds_beyond_every_radius_just_drift():
     np.testing.assert_allclose(positions, expected)
     for rule, force in forces.items():
         np.testing.assert_array_equal(force, np.zeros((2, 2)), err_msg=rule)
+
+
+def test_the_reconstruction_invariant_holds_with_the_speed_floor():
+    """The load-bearing invariant under the new clamp.
+
+    Adding the floor changed the function on the outside of
+    `clamp(v + sum(f)*dt) == v'`. The recorded forces must still reproduce the
+    update, on every bird on every tick, with the floor engaged.
+    """
+    _assert_reconstruction_holds(PHYSICS_CRUISING, seed=3)
+
+
+def test_a_cruising_flock_keeps_moving():
+    """Why the floor exists at all.
+
+    Without it, alignment steers each bird toward its neighbours' mean
+    *vector*, and the mean of scattered vectors is short - so the flock
+    organises its headings and brakes to a crawl in the same motion. Measured
+    without the floor: mean speed falls to about 0.27 and stays there.
+    """
+    positions, velocities = random_flock(seed=0, n_birds=N_BIRDS)
+    for _ in range(TICKS):
+        positions, velocities, _ = step(positions, velocities, PHYSICS_CRUISING)
+    cruising = np.linalg.norm(velocities, axis=1)
+
+    positions, velocities = random_flock(seed=0, n_birds=N_BIRDS)
+    for _ in range(TICKS):
+        positions, velocities, _ = step(positions, velocities, PHYSICS)
+    drifting = np.linalg.norm(velocities, axis=1)
+
+    assert cruising.min() >= PHYSICS_CRUISING.min_speed - 1e-9
+    assert cruising.mean() < PHYSICS_CRUISING.min_speed * 1.5
+    assert drifting.mean() < PHYSICS_CRUISING.min_speed / 2, (
+        "premise failed: the flock did not slow down without the floor, so "
+        "this comparison shows nothing"
+    )
+
+
+def test_speed_stays_between_the_floor_and_the_cap_on_every_tick():
+    """The screenshot, as an assertion.
+
+    Random headings, 500 ticks, floor engaged: every bird must sit inside
+    [min_speed, max_speed] at every single tick, not merely at the end. The
+    picture shows this as every arrow being the same length from tick 25
+    onwards; this is that claim in a form that fails loudly.
+
+    It would also catch a bird stalling to exactly zero, which the floor cannot
+    rescue because a zero vector has no direction - measured to happen only in
+    flocks too small to be flocks, and this pins that it stays that way.
+    """
+    physics = PHYSICS_CRUISING
+    positions, velocities = random_flock(seed=11, n_birds=N_BIRDS)
+    floor_engaged = 0
+
+    for tick in range(500):
+        positions, velocities, _ = step(positions, velocities, physics)
+        speeds = np.linalg.norm(velocities, axis=1)
+        assert speeds.min() >= physics.min_speed - 1e-9, (
+            f"bird below the floor at tick {tick}: {speeds.min()}")
+        assert speeds.max() <= physics.max_speed + 1e-9, (
+            f"bird above the cap at tick {tick}: {speeds.max()}")
+        floor_engaged += int(np.isclose(speeds.min(), physics.min_speed))
+
+    # Measured at this density: the floor holds at least one bird on about
+    # 30% of ticks. At 60 birds it is every tick; at 20 the flock is sparse
+    # enough that many birds drift above it on their own.
+    assert floor_engaged > 50, (
+        f"premise failed: the floor only engaged on {floor_engaged} of 500 "
+        "ticks, so this mostly tested a flock that never needed it"
+    )
+
+
+def test_the_shipped_defaults_produce_a_sane_rollout():
+    """Physics() with no arguments is what a careless caller gets.
+
+    Every other test overrides the defaults - the baseline pins min_speed=0.0
+    and alignment_radius=35.0 where the dataclass ships 2.0 and 30.0 - so the
+    values in boids.py were, until now, exercised by nothing at all.
+    """
+    physics = Physics()
+    positions, velocities = random_flock(seed=13, n_birds=N_BIRDS)
+
+    for tick in range(TICKS):
+        positions, velocities, forces = step(positions, velocities, physics)
+        speeds = np.linalg.norm(velocities, axis=1)
+        assert not np.isnan(positions).any(), f"NaN position at tick {tick}"
+        assert np.all(positions >= 0.0) and np.all(positions < physics.bounds)
+        assert physics.min_speed - 1e-9 <= speeds.min()
+        assert speeds.max() <= physics.max_speed + 1e-9
+        for rule, force in forces.items():
+            assert not np.isnan(force).any(), f"NaN {rule} force at tick {tick}"

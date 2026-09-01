@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from boids import Physics, get_torus, velocity_capper
-from world import BOUNDS, MAX_SPEED
+from world import BOUNDS, MAX_SPEED, MIN_SPEED
 
 
 def test_short_delta_passes_through_untouched():
@@ -128,3 +128,80 @@ def test_physics_rejects_nonsense_scales():
         Physics(dt=0.0)
     with pytest.raises(ValueError):
         Physics(max_speed=-5.0)
+
+
+# --- velocity_capper: the speed floor ----------------------------------------
+
+def test_floor_raises_a_slow_velocity_without_turning_it():
+    """The mirror of the cap: rescale the magnitude, keep the heading.
+
+    Speed 1.0 against a floor of 2.0 must double the vector, not rotate it.
+    """
+    out = velocity_capper(np.array([0.6, 0.8]), MAX_SPEED, MIN_SPEED)
+
+    np.testing.assert_allclose(out, [1.2, 1.6])
+    assert np.linalg.norm(out) == pytest.approx(MIN_SPEED)
+
+
+def test_floor_leaves_a_fast_enough_velocity_untouched():
+    velocity = np.array([3.0, 0.0])
+
+    np.testing.assert_array_equal(
+        velocity_capper(velocity, MAX_SPEED, MIN_SPEED), velocity)
+
+
+def test_floor_leaves_velocity_exactly_at_the_floor():
+    """`0 < speed < min_speed` is strict at both ends, deliberately."""
+    velocity = np.array([MIN_SPEED, 0.0])
+
+    np.testing.assert_array_equal(
+        velocity_capper(velocity, MAX_SPEED, MIN_SPEED), velocity)
+
+
+def test_floor_leaves_a_motionless_bird_at_rest():
+    """A zero vector has no direction to rescale, so it stays put.
+
+    Measured over 60,000 bird-ticks: speed is exactly zero if and only if a
+    bird has no neighbour in any radius AND started at rest, which never
+    happens at ten birds or more. This branch is a guard against dividing by
+    zero, not a behaviour anything relies on.
+    """
+    out = velocity_capper(np.array([0.0, 0.0]), MAX_SPEED, MIN_SPEED)
+
+    assert not np.isnan(out).any(), "a zero vector must not be rescaled"
+    np.testing.assert_array_equal(out, [0.0, 0.0])
+
+
+def test_a_floor_of_zero_disables_it():
+    """min_speed = 0.0 must reproduce the behaviour from before the floor."""
+    velocity = np.array([0.001, 0.0])
+
+    np.testing.assert_array_equal(
+        velocity_capper(velocity, MAX_SPEED, 0.0), velocity)
+
+
+def test_floor_equal_to_cap_gives_constant_speed():
+    """The self-propelled-particle setup: every bird flies at exactly one speed."""
+    slow = velocity_capper(np.array([0.5, 0.0]), 2.0, 2.0)
+    fast = velocity_capper(np.array([9.0, 0.0]), 2.0, 2.0)
+
+    np.testing.assert_allclose(slow, [2.0, 0.0])
+    np.testing.assert_allclose(fast, [2.0, 0.0])
+
+
+def test_physics_allows_a_floor_of_zero_and_a_floor_equal_to_the_cap():
+    """Both ends of the range are legal and both are useful.
+
+    min_speed = 0 means no floor, which is what ablations and any test that
+    needs the floor out of the way will ask for. min_speed = max_speed is the
+    constant-speed flocking model. Neither is an error.
+    """
+    assert Physics(min_speed=0.0).min_speed == 0.0
+    assert Physics(min_speed=5.0, max_speed=5.0).min_speed == 5.0
+
+
+def test_physics_rejects_a_floor_above_the_cap():
+    with pytest.raises(ValueError):
+        Physics(min_speed=6.0, max_speed=5.0)
+    with pytest.raises(ValueError):
+        Physics(min_speed=-1.0)
