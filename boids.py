@@ -11,6 +11,7 @@ class Physics:
     max_speed: float = 5.0
     separation_radius: float = 20.0
     alignment_radius: float = 30.0   #a placeholder for future use
+    cohesion_radius: float = 40.0
     sep_force_cap: float = 1.0
     w_sep: float = 1.5
     w_ali: float = 1.0
@@ -22,7 +23,7 @@ class Physics:
         #Minimum-image caps any axis-displacement at bounds/2, 
         #so neighbours beyond that distance are unreachable; a radius ≥ bounds/2 makes every bird a neighbour of every other, 
         #and the radius stops selecting anything
-        for name in ("separation_radius", "alignment_radius"):
+        for name in ("separation_radius", "alignment_radius", "cohesion_radius"):
             radius = getattr(self, name)
             if not 0 < radius < self.bounds / 2:
                 raise ValueError(
@@ -75,7 +76,24 @@ def calculate_alignment(boid_id, positions, velocities, alignment_radius, bounds
             neighbor_count += 1
     if neighbor_count == 0:
         return np.array([0.0, 0.0])      
-    return total_force / neighbor_count - my_velocity #otherwise mean = my_velo; force = 0 (moving in one direction)
+    return total_force / neighbor_count - my_velocity #otherwise mean = my_velo; force = 0 (body moving in one direction)
+
+def calculate_cohesion(boid_id, positions, cohesion_radius, bounds):
+    my_pos = positions[boid_id]
+    total_force = np.zeros(2)
+    neighbor_count = 0
+    for i, neighbor_pos in enumerate(positions):
+        if i == boid_id:
+            continue
+        offset = get_torus(neighbor_pos, my_pos, bounds) #arguments swapped => vector pointing me from me to my neighbor
+        dist = np.linalg.norm(offset)
+        if dist < cohesion_radius:
+            total_force += offset
+            neighbor_count += 1
+    if neighbor_count == 0: 
+        return np.array([0.0, 0.0])
+    mean = total_force / neighbor_count
+    return mean / cohesion_radius #smooth 0->1 vector, spring dynamics(no 1/d regime)
 
 def velocity_capper(old_velocity, max_speed):
     speed = np.linalg.norm(old_velocity)
@@ -93,19 +111,20 @@ def step(positions, velocities, physics):
     N = len(positions) #this gets birds count
     sep_forces = np.zeros((N, 2))
     ali_forces = np.zeros((N, 2))
+    coh_forces = np.zeros((N,2))
     for i in range(N): #one pass per bird, all rules read the same unmutated state
-        sep_forces[i] = calculate_separation(
-            i, positions, physics.separation_radius, bounds, physics.sep_force_cap)
-        ali_forces[i] = calculate_alignment(
-            i, positions, velocities, physics.alignment_radius, bounds)
+        sep_forces[i] = calculate_separation(i, positions, physics.separation_radius, bounds, physics.sep_force_cap)
+        ali_forces[i] = calculate_alignment(i, positions, velocities, physics.alignment_radius, bounds)
+        coh_forces[i] = calculate_cohesion(i, positions ,physics.cohesion_radius, bounds)
     forces = {
     "separation": sep_forces * physics.w_sep,
     "alignment": ali_forces * physics.w_ali,
-    "cohesion": np.zeros((N, 2))}
+    "cohesion": coh_forces * physics.w_coh,}
     new_velocities = np.zeros_like(velocities, dtype=float)
     new_positions = np.zeros_like(positions, dtype=float)
     for i in range(N):
-        total_force = (forces["separation"][i]
+        total_force = (
+                 forces["separation"][i]
                + forces["alignment"][i]
                + forces["cohesion"][i])
 
