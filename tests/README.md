@@ -1,6 +1,6 @@
 # The test suite
 
-80 tests, ~6 seconds. `pytest -q` from the repo root.
+81 tests, ~6 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -14,7 +14,7 @@ caught a real bug in real code, and those are marked.
 
 | file | what it covers | tests |
 |---|---|---|
-| `test_geometry.py` | torus distance, the two-sided speed clamp, `Physics` validation | 20 |
+| `test_geometry.py` | torus distance, the two-sided speed clamp, `Physics` validation | 21 |
 | `test_separation.py` | `calculate_separation` | 10 |
 | `test_alignment.py` | `calculate_alignment` | 6 |
 | `test_cohesion.py` | `calculate_cohesion` | 11 |
@@ -56,6 +56,7 @@ The primitives every rule is built on.
 | `physics_allows_a_floor_of_zero_and_a_floor_equal_to_the_cap` | over-strict validation: both endpoints are legal and both are useful |
 | `physics_rejects_a_floor_above_the_cap` | a clamp with no satisfiable range |
 | `physics_rejects_nonsense_scales` | negative or zero `bounds`, `dt`, `max_speed` |
+| `the_test_baseline_tracks_the_shipped_config` | `world.py` restating a constant as a literal instead of deriving it from `Physics()`. The two files had already drifted once — alignment_radius 35.0 against 30.0. Checks the module-level names too, not just the config objects: the first version of this test checked only the objects and a mutation reintroducing the literal passed all 81 tests |
 
 ## test_separation.py
 

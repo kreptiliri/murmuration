@@ -1,42 +1,11 @@
 # ==========================================================================
-# THE WHOLE SUITE IN ONE FILE - reference copy, entirely commented out.
-#
-# This is not run by pytest. Every line below is a comment, and the leading
-# underscore keeps the filename from matching pytest's test_*.py discovery
-# pattern, so nothing here is collected or executed twice.
-#
-# It exists to be read end-to-end. The live suite is the seven files this was
-# assembled from; if you change a test, change it there - nothing keeps this
-# copy in sync, and a stale reference copy is worse than none.
-#
-# Regenerate with the snippet at the bottom of this header rather than editing:
-#
-#   python - <<'EOF'
-#   import pathlib
-#   order = ["world.py", "test_geometry.py", "test_separation.py",
-#            "test_alignment.py", "test_cohesion.py", "test_step.py",
-#            "test_rollout.py"]
-#   out = []
-#   for name in order:
-#       body = pathlib.Path("tests", name).read_text().rstrip("\n")
-#       out.append("# " + "=" * 74 + f"\n# {name}\n# " + "=" * 74 + "\n"
-#                  + "\n".join(("# " + l).rstrip() for l in body.splitlines()))
-#   pathlib.Path("tests/_all_tests_combined.py").write_text("\n\n\n".join(out))
-#   EOF
-#
-# Last regenerated: 80 tests.
-# ==========================================================================
-
-
-# ==========================================================================
 # world.py
 # ==========================================================================
 # """The world every test in this suite runs in.
 #
-# Shared so that the five test modules cannot drift into disagreeing about the
-# size of the world or how fast a bird may fly. Tests that need to vary one
-# constant use dataclasses.replace(PHYSICS, thing=...), which changes that field
-# and leaves the other nine exactly as they are here.
+# Every constant here derives from boids.py's Physics() rather than being
+# restated, so the test suite and the simulator cannot disagree about the size of
+# the world or how fast a bird may fly. There is one declaration, in boids.py.
 # """
 #
 # from dataclasses import replace
@@ -45,30 +14,28 @@
 #
 # from boids import Physics
 #
-# # a 100x100 torus
-# BOUNDS = 100.0
-# SEPARATION_RADIUS = 20.0
-# ALIGNMENT_RADIUS = 35.0
-# COHESION_RADIUS = 40.0
-# MAX_SPEED = 5.0
-# MIN_SPEED = 2.0
-# DT = 0.1
+# # PHYSICS_CRUISING is the shipped configuration, taken from boids.py rather
+# # than restated here. Everything below derives from it.
+# #
+# # The previous version declared BOUNDS, ALIGNMENT_RADIUS and the rest as
+# # literals and fed them back into Physics(...), which is a second source of
+# # truth for the same quantities - and they had already drifted apart, with
+# # alignment_radius 35.0 here against 30.0 in boids.py. Deriving makes that
+# # class of divergence impossible rather than merely fixing today's instance.
+# PHYSICS_CRUISING = Physics()
 #
-# # The baseline pins min_speed=0.0 - no floor - so that every test written
+# # The same world with the speed floor switched off, so that every test written
 # # before the floor existed still means exactly what it meant then. Tests that
-# # want the floor use PHYSICS_CRUISING, or replace(PHYSICS, min_speed=...).
-# PHYSICS = Physics(
-#     dt=DT,
-#     bounds=BOUNDS,
-#     max_speed=MAX_SPEED,
-#     min_speed=0.0,
-#     separation_radius=SEPARATION_RADIUS,
-#     alignment_radius=ALIGNMENT_RADIUS,
-#     cohesion_radius=COHESION_RADIUS,
-# )
+# # vary one constant use dataclasses.replace(PHYSICS, thing=...).
+# PHYSICS = replace(PHYSICS_CRUISING, min_speed=0.0)
 #
-# # The same world with the speed floor switched on.
-# PHYSICS_CRUISING = replace(PHYSICS, min_speed=MIN_SPEED)
+# BOUNDS = PHYSICS.bounds
+# SEPARATION_RADIUS = PHYSICS.separation_radius
+# ALIGNMENT_RADIUS = PHYSICS.alignment_radius
+# COHESION_RADIUS = PHYSICS.cohesion_radius
+# MAX_SPEED = PHYSICS.max_speed
+# MIN_SPEED = PHYSICS_CRUISING.min_speed
+# DT = PHYSICS.dt
 #
 #
 # def random_flock(seed, n_birds):
@@ -85,13 +52,14 @@
 # """The primitives every rule is built on: torus distance, the speed cap,
 # and the Physics config object's own validation."""
 #
-# from dataclasses import FrozenInstanceError
+# from dataclasses import FrozenInstanceError, asdict
 #
 # import numpy as np
 # import pytest
 #
 # from boids import Physics, get_torus, velocity_capper
-# from world import BOUNDS, MAX_SPEED, MIN_SPEED
+# from world import (ALIGNMENT_RADIUS, BOUNDS, COHESION_RADIUS, DT, MAX_SPEED,
+#                    MIN_SPEED, PHYSICS, PHYSICS_CRUISING, SEPARATION_RADIUS)
 #
 #
 # def test_short_delta_passes_through_untouched():
@@ -289,6 +257,42 @@
 #         Physics(min_speed=6.0, max_speed=5.0)
 #     with pytest.raises(ValueError):
 #         Physics(min_speed=-1.0)
+#
+#
+# def test_the_test_baseline_tracks_the_shipped_config():
+#     """world.py must derive from boids.py, not restate it.
+#
+#     These two files once declared the same constants independently and drifted:
+#     alignment_radius was 35.0 in world.py against 30.0 in boids.py, and during a
+#     planning session a measurement taken with one was reported alongside the
+#     other. Deriving makes that impossible, and this asserts the derivation
+#     rather than trusting it - if anyone reintroduces a literal, the two configs
+#     can differ again and this is what notices.
+#
+#     PHYSICS_CRUISING is the shipped config verbatim. PHYSICS is the same world
+#     with the speed floor switched off, and that is the *only* difference.
+#     """
+#     assert PHYSICS_CRUISING == Physics(), (
+#         "PHYSICS_CRUISING must be boids.py's Physics() unchanged")
+#
+#     shipped, baseline = asdict(Physics()), asdict(PHYSICS)
+#     differing = {k for k in shipped if shipped[k] != baseline[k]}
+#     assert differing == {"min_speed"}, (
+#         f"the test baseline differs from the shipped config in {differing}, "
+#         "but min_speed is the only difference it is allowed to have"
+#     )
+#
+#     # And the module-level names must be the config's own values, not copies.
+#     # Checking only the Physics objects leaves the original bug available: a
+#     # literal reintroduced here would disagree with PHYSICS.alignment_radius
+#     # while both objects stayed correct. A mutation test found exactly that
+#     # hole in the first version of this test.
+#     assert (BOUNDS, SEPARATION_RADIUS, ALIGNMENT_RADIUS,
+#             COHESION_RADIUS, MAX_SPEED, DT) == (
+#         PHYSICS.bounds, PHYSICS.separation_radius, PHYSICS.alignment_radius,
+#         PHYSICS.cohesion_radius, PHYSICS.max_speed, PHYSICS.dt), (
+#         "a world.py constant has been restated as a literal instead of derived")
+#     assert MIN_SPEED == PHYSICS_CRUISING.min_speed
 
 
 # ==========================================================================
@@ -522,14 +526,18 @@
 # def test_alignment_ignores_distance_inside_the_radius():
 #     """No 1/d falloff - that is separation's law, not this one.
 #
-#     A neighbour at d = 5 and the same neighbour at d = 30 must produce an
+#     A neighbour at d = 5 and the same neighbour at d = 25 must produce an
 #     identical force. This is what catches alignment written by copy-pasting
 #     calculate_separation and forgetting to strip the distance weighting.
+#
+#     The far distance is 25 rather than 30 because ALIGNMENT_RADIUS now derives
+#     from boids.py and is 30.0; the comparison is a strict <, so a neighbour at
+#     exactly 30 would fall outside and this would be testing nothing.
 #     """
 #     velocities = np.array([[1.0, 0.0],
 #                            [0.0, 1.0]])
 #     near = np.array([[50.0, 50.0], [55.0, 50.0]])   # d = 5
-#     far = np.array([[50.0, 50.0], [80.0, 50.0]])    # d = 30, still inside 35
+#     far = np.array([[50.0, 50.0], [75.0, 50.0]])    # d = 25, inside 30
 #
 #     force_near = calculate_alignment(0, near, velocities, ALIGNMENT_RADIUS, BOUNDS)
 #     force_far = calculate_alignment(0, far, velocities, ALIGNMENT_RADIUS, BOUNDS)
@@ -987,13 +995,18 @@
 #                                2.0 * forces_1x["alignment"][0])
 #
 # def test_step_reads_the_alignment_radius():
-#     """The same pair of birds, neighbours under one radius and not the other."""
+#     """The same pair of birds, neighbours under one radius and not the other.
+#
+#     The wide case is PHYSICS itself rather than a hardcoded radius, so this
+#     tests the configured value rather than an arbitrary number that happens to
+#     exceed 25.
+#     """
 #     positions = np.array([[50.0, 50.0],
-#                           [80.0, 50.0]])   # d = 30
+#                           [75.0, 50.0]])   # d = 25, inside the configured 30
 #     velocities = np.array([[1.0, 0.0],
 #                            [0.0, 1.0]])
 #
-#     _, _, wide = step(positions, velocities, replace(PHYSICS, alignment_radius=35.0))
+#     _, _, wide = step(positions, velocities, PHYSICS)
 #     _, _, narrow = step(positions, velocities, replace(PHYSICS, alignment_radius=10.0))
 #
 #     np.testing.assert_allclose(wide["alignment"][0], [-1.0, 1.0])
@@ -1597,9 +1610,11 @@
 # def test_the_shipped_defaults_produce_a_sane_rollout():
 #     """Physics() with no arguments is what a careless caller gets.
 #
-#     Every other test overrides the defaults - the baseline pins min_speed=0.0
-#     and alignment_radius=35.0 where the dataclass ships 2.0 and 30.0 - so the
-#     values in boids.py were, until now, exercised by nothing at all.
+#     Since world.py began deriving from Physics() this is nearly what
+#     PHYSICS_CRUISING already is, so the gap this test was written to cover has
+#     mostly closed. It stays because it constructs Physics() literally: if a
+#     future default were changed without world.py being re-read, this is the
+#     test that runs against the new value rather than a remembered one.
 #     """
 #     physics = Physics()
 #     positions, velocities = random_flock(seed=13, n_birds=N_BIRDS)
