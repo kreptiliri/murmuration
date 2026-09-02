@@ -1,5 +1,30 @@
+import subprocess
+from pathlib import Path
+
 import numpy as np
 from boids import step
+
+import dataclasses
+import json
+
+
+_REPO = Path(__file__).resolve().parent
+
+
+def _git(*args):
+    return subprocess.run(["git", "-C", str(_REPO), *args],
+                          capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+def git_is_dirty():
+    return bool(_git("status", "--porcelain"))
+
+
+def git_provenance():
+    return {"commit": _git("rev-parse", "HEAD"),
+            "tag": _git("describe", "--tags", "--always"),
+            "dirty": git_is_dirty()}
 
 
 def polarisation(velocities):
@@ -9,6 +34,10 @@ def polarisation(velocities):
     unit_headings = velocities / safe_speeds                    
     return np.linalg.norm(unit_headings.mean(axis=0))           
 
+def clip_seed(base_seed, index):
+    #(entropy, spawn key) is what identifies each spawned child, every
+    #child of spawn() inherits the parent's entropy alone
+    return np.random.SeedSequence(entropy=base_seed, spawn_key=(index,))
 
 def generate_clip(physics, *, n_slots, n_live, n_ticks, seed):
     rng = np.random.default_rng(seed)
@@ -77,7 +106,62 @@ def generate_clip(physics, *, n_slots, n_live, n_ticks, seed):
     "settle_tick": settle_tick}
 
 
+def build_dataset(physics, *, n_clips, n_slots, n_live, n_ticks, base_seed, out_dir, allow_dirty=False):
+    #refuse to run now, before generating
+    if git_is_dirty() and not allow_dirty:
+        raise RuntimeError(
+            "the working tree has uncommitted changes, so the commit recorded "
+            "in config.json would not describe the running code, commit "
+            "first, or pass allow_dirty=True to record the dataset as "
+            "provisional.")
 
+    provenance = git_provenance()  #captured once, here, so every clip in this dataset carries the same SHA
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    clips = []
+    for i in range(n_clips):
+        clips.append(generate_clip(physics, n_slots=n_slots, n_live=n_live, n_ticks=n_ticks, seed=clip_seed(base_seed, i)))
+
+    stacked = {}
+    float_keys = ("positions", "velocities", "separation", "alignment", "cohesion")
+    for key in float_keys:
+        arrays = []
+        for c in clips:
+            arrays.append(c[key])
+        stacked[key] = np.stack(arrays).astype(np.float32)
+
+    mask_arrays = []
+    for c in clips:
+        mask_arrays.append(c["mask"])
+    stacked["mask"] = np.stack(mask_arrays)
+    kind_arrays = []
+    for c in clips:
+        kind_arrays.append(c["kind"])
+    stacked["kind"] = np.stack(kind_arrays)
+    # Stack settle_tick (int32)
+    settle_list = []
+    for c in clips:
+        settle_list.append(c["settle_tick"])
+    stacked["settle_tick"] = np.array(settle_list, dtype=np.int32)
+    #build and write config.json
+    np.savez_compressed(out_dir / "clips.npz", **stacked)
+    config_data = {
+        "physics": dataclasses.asdict(physics),
+        "generation": {
+            "n_clips": n_clips,
+            "n_slots": n_slots,
+            "n_live": n_live,
+            "n_ticks": n_ticks,
+            "base_seed": base_seed,
+            "allow_dirty": allow_dirty,
+        },
+        "provenance": provenance,
+    }
+    with open(out_dir / "config.json", "w") as f:
+        json.dump(config_data, f, indent=2)
+
+
+    return out_dir
 
         
 
