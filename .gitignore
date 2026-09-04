@@ -8,7 +8,6 @@ data/
 *.pt
 *.npz
 
-# local scratch
 temp.txt
 .pytest_cache/
 
