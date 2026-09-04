@@ -1,16 +1,11 @@
 # The test suite
 
-81 tests, ~6 seconds. `pytest -q` from the repo root.
+118 tests, ~7 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
 raises nothing, so this suite is written to catch errors that *look fine* —
 plausible numbers, no exception, no NaN — rather than crashes.
-
-Every test below has been checked by mutation: the bug it claims to catch was
-introduced into `boids.py` deliberately, and the test failed. A test nobody has
-watched fail is a test nobody has tested. Five of them were written because they
-caught a real bug in real code, and those are marked.
 
 | file | what it covers | tests |
 |---|---|---|
@@ -20,13 +15,45 @@ caught a real bug in real code, and those are marked.
 | `test_cohesion.py` | `calculate_cohesion` | 11 |
 | `test_step.py` | one tick: the integrator, the constants, the label invariants | 20 |
 | `test_rollout.py` | hundreds of ticks: what only shows up over time | 13 |
+| `test_generate.py` | `generate_clip()`: one clip in memory | 17 |
+| `test_dataset.py` | `build_dataset()`: many clips, on disk, with provenance | 20 |
 
-`world.py` holds the shared constants and two baselines, so the six files cannot
+## What "checked" means, per file
+
+The distinction matters, because the two words below are not equally strong.
+
+**The six simulator files are mutation-checked.** Every bug a test claims to
+catch was introduced into `boids.py` deliberately and the test was watched
+failing. A test nobody has watched fail is a test nobody has tested. Five were
+written *because* they caught a real bug in real code, and those are marked.
+
+**The two dataset files were written before the code they test**, as its
+specification, and the implementation was built into them. That is good
+evidence of a different kind — the interface could not be bent to fit whatever
+got written — but it is not the same as watching each one fail for the right
+reason. Two of them have been checked harder than the rest, and both times
+because something was actually wrong:
+
+- `settle_tick_matches_a_recomputation` in `test_dataset.py` was **vacuous when
+  first written**. At the fixture's clip length no flock reaches polarisation
+  0.99, so the recomputation and the stored value were both `-1` and a
+  hardcoded answer passed. It now runs on a 300-tick fixture, asserts that at
+  least one clip settled, and was mutation-checked against exactly that.
+- The polarisation definition itself was wrong in the first implementation —
+  mean velocity over mean speed, rather than the length of the mean *unit*
+  heading. The two disagree badly: two birds flying at each other score 0.43 by
+  the first and 0.0 by the second.
+
+`world.py` holds the shared constants and two baselines, so the files cannot
 drift into disagreeing about the size of the world. `PHYSICS` pins
 `min_speed=0.0` — no floor — so that every test written before the floor existed
 still means exactly what it meant then; `PHYSICS_CRUISING` is the same world with
 the floor on. Tests that vary one constant use
 `dataclasses.replace(PHYSICS, thing=...)`.
+
+`_all_tests_combined.py` is a generated read-only copy of the whole suite.
+Rebuild it with `.venv/bin/python tests/_regenerate_combined.py` after adding a
+test, and commit the result alongside.
 
 ---
 
@@ -152,3 +179,59 @@ Hundreds of ticks. A different class of bug lives here.
 | `a_rollout_is_reproducible` | non-determinism, which would make the dataset unregenerable from its own metadata |
 | `two_birds_beyond_every_radius_just_drift` | a rule firing when nothing is in range |
 | `the_shipped_defaults_produce_a_sane_rollout` | `Physics()` with no arguments — what a careless caller gets, and what every other test overrides |
+
+## test_generate.py
+
+`generate_clip()` — one clip's arrays in memory, no I/O. Written before the
+function existed; its module docstring is the interface contract, including
+four decisions that were made rather than derived.
+
+| test | catches |
+|---|---|
+| `the_shape_contract` | the 301/300 asymmetry collapsing. `n_ticks` steps give `n_ticks` force sets and `n_ticks + 1` states; padding the forces to square them off fabricates a label for tick 0, and zero is an ordinary force so nothing looks wrong afterwards |
+| `arrays_are_float64_in_memory` | the storage cast creeping upstream, which would silently weaken the exact tick-alignment test below into a tolerance |
+| `the_sizing_arguments_are_keyword_only` | `n_slots`, `n_live`, `n_ticks` passed positionally. Any two swapped runs perfectly and yields a differently shaped world |
+| `forces_produce_the_next_velocity_exactly` | **the load-bearing one.** `forces[t]` must reconstruct `velocities[t] → velocities[t+1]` exactly. Recorded one iteration off, every label describes the wrong state and the dataset stays perfectly self-consistent |
+| `forces_are_the_rules_applied_to_the_state_at_that_tick` | the same misalignment from the other side — each force compared against its own rule function on the state stored at that index. The only check that looks at the input rather than at the pipeline's own output |
+| `initial_velocities_are_legal` | tick 0 drawn as `random_flock` does it. Over 200 seeds × 12 birds, 33.2% of those states are ones the simulator cannot produce — a third of the dataset would begin outside its own physics |
+| `headings_are_not_all_the_same_at_tick_zero` | a heading draw that collapses, which would make every clip start already flocked |
+| `the_world_invariants_hold_at_every_tick` | positions leaving `[0, bounds)` or speeds leaving the clamp partway through a clip |
+| `no_nan_in_live_slots` | a NaN reaching a live bird, where every statistic downstream would swallow it silently |
+| `every_slot_is_live_when_n_live_equals_n_slots` | the training split quietly masking something |
+| `dead_slots_are_nan_and_exactly_complement_the_mask` | zero-filled dead slots, which read as a bird parked at the origin. NaN makes the mask and the arrays checkable against each other |
+| `masked_slots_exert_no_force_on_live_birds` | **the quietest corruption available.** `step` takes `N = len(positions)`, so a dead slot handed to it is simply a bird — it pushes on its neighbours and enters their averages, and nothing raises. Also pins the draw *size*: the two clips compared only match if exactly `n_live` positions were drawn |
+| `the_same_seed_reproduces_the_clip_bit_for_bit` | non-determinism, which makes the dataset unregenerable from its own metadata |
+| `a_seed_sequence_is_accepted_and_distinguishes_clips` | a `SeedSequence` being coerced or ignored rather than used |
+| `different_seeds_give_different_clips` | every clip being the same flock |
+| `settle_tick_matches_a_recomputation_from_the_stored_velocities` | a settling tick that does not describe the velocities stored beside it. Run at 400 ticks so the answer is not trivially `-1` |
+| `settle_tick_is_minus_one_when_the_flock_never_orders` | the other branch: a clip that never settles reporting a tick anyway |
+
+## test_dataset.py
+
+`build_dataset()` — many clips, written to `clips.npz` and `config.json`. Also
+written before the code. Every check is over live slots explicitly, never
+trusting NaN to surface a mistake: NaN shouts on comparisons but `mean()`
+propagates it in silence.
+
+| test | catches |
+|---|---|
+| `the_writer_produces_the_two_files` | a run that reports success and writes nothing |
+| `build_dataset_returns_the_directory_it_wrote` | a string return where a `Path` is expected |
+| `the_stored_shapes_carry_a_clips_axis` | clips stacked on the wrong axis, or flattened into one long run |
+| `the_force_arrays_are_never_padded_to_match_the_states` | the 301/300 asymmetry being squared off at the storage layer instead |
+| `the_stored_dtypes` | float64 leaking to disk (doubling the dataset), or `settle_tick` widening to int64 |
+| `kind_is_all_birds_for_now` | the reserved hawk channel picking up values nothing writes yet |
+| `the_physics_round_trips_field_for_field` | a config that cannot rebuild the `Physics` that made it. Reconstructing the dataclass also proves the stored keys are the field names, so a rename fails here rather than producing a config nothing can load |
+| `the_generation_parameters_are_recorded` | a dataset that cannot say what shape it was asked for |
+| `provenance_is_recorded` | values without the code that interpreted them. The SHA is compared against `git rev-parse HEAD` |
+| `the_allow_dirty_flag_is_recorded_even_when_the_tree_is_clean` | provenance that omits how much it should be trusted |
+| `a_dirty_tree_is_refused_unless_allowed` | a dataset generated from uncommitted code recording a SHA that does not describe it — worse than no provenance, because it reads as trustworthy |
+| `clip_seed_reproduces_the_spawned_child_and_does_not_depend_on_n` | **the seeding trap.** Every child of `SeedSequence.spawn()` inherits the parent's `.entropy`, so storing that writes one identical number for every clip and reseeding from it gives a stream that generated none of them. `SeedSequence(entropy=base, spawn_key=(i,))` reproduces `spawn(n)[i]`, verified for two different `n` |
+| `clip_seed_gives_every_clip_a_different_stream` | the same trap from the other side |
+| `a_stored_clip_regenerates_from_the_base_seed_and_its_index` | the claim that makes a `seeds` column unnecessary: `(base_seed, index)` is enough to rebuild any clip exactly |
+| `the_clips_are_not_all_the_same_flock` | every clip seeded from the base seed itself |
+| `forces_reconstruct_velocities_after_the_float32_round_trip` | tick alignment surviving the storage cast. Exactness is gone by definition once the arrays are float32; the measured worst case is 2.9e-07, about 2.4× float32 epsilon, so a failure at 1e-6 means misalignment rather than a tight bound |
+| `mask_and_nan_are_exact_complements_on_disk` | the checksum breaking somewhere between memory and the file |
+| `no_nan_in_live_slots` | what makes every live-slots-only check in this file safe to rely on |
+| `positions_and_speeds_are_legal_including_tick_0` | tick 0 specifically — the one state the simulator never produced. The upper bound on position is closed rather than half-open, because a coordinate a hair under `bounds` can round *up* to exactly `bounds` in float32 |
+| `settle_tick_matches_a_recomputation_from_the_stored_velocities` | a settling tick that does not describe the file it sits in. Runs on a 300-tick fixture and asserts at least one clip settled — see the note above on why |

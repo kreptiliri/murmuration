@@ -45,7 +45,6 @@
 #     velocities = rng.uniform(-MAX_SPEED, MAX_SPEED, size=(n_birds, 2))
 #     return positions, velocities
 
-
 # ==========================================================================
 # test_geometry.py
 # ==========================================================================
@@ -294,7 +293,6 @@
 #         "a world.py constant has been restated as a literal instead of derived")
 #     assert MIN_SPEED == PHYSICS_CRUISING.min_speed
 
-
 # ==========================================================================
 # test_separation.py
 # ==========================================================================
@@ -475,7 +473,6 @@
 #
 #     np.testing.assert_allclose(force, [-0.2, 0.0])
 
-
 # ==========================================================================
 # test_alignment.py
 # ==========================================================================
@@ -595,7 +592,6 @@
 #
 #     assert not np.isnan(force).any()
 #     np.testing.assert_array_equal(force, [0.0, 0.0])
-
 
 # ==========================================================================
 # test_cohesion.py
@@ -814,7 +810,6 @@
 #
 #     assert not np.isnan(force).any()
 #     np.testing.assert_array_equal(force, [0.0, 0.0])
-
 
 # ==========================================================================
 # test_step.py
@@ -1310,7 +1305,6 @@
 #         "not exercise the precision loss it exists to bound"
 #     )
 
-
 # ==========================================================================
 # test_rollout.py
 # ==========================================================================
@@ -1628,3 +1622,742 @@
 #         assert speeds.max() <= physics.max_speed + 1e-9
 #         for rule, force in forces.items():
 #             assert not np.isnan(force).any(), f"NaN {rule} force at tick {tick}"
+
+# ==========================================================================
+# test_generate.py
+# ==========================================================================
+# """The contract for `generate_clip()` — written before it exists.
+#
+# This file is the specification. `generate.py` does not exist yet, so the whole
+# module skips; the moment it does, these become real and most of them will be
+# red. Build into them.
+#
+#     generate_clip(physics, *, n_slots, n_live, n_ticks, seed) -> dict
+#
+# Returns one clip's arrays in memory. No file I/O, no config, no summary — those
+# are the writer's job and get their own tests.
+#
+#     positions    (n_ticks + 1, n_slots, 2)  float64   state at ticks 0..n_ticks
+#     velocities   (n_ticks + 1, n_slots, 2)  float64
+#     separation   (n_ticks,     n_slots, 2)  float64   force on state[t] -> [t+1]
+#     alignment    (n_ticks,     n_slots, 2)  float64
+#     cohesion     (n_ticks,     n_slots, 2)  float64
+#     mask         (n_ticks + 1, n_slots)     bool      slot holds a live entity
+#     kind         (n_slots,)                 int8      0 = bird
+#     settle_tick  int                        smallest index into `velocities`
+#                                             with polarisation > 0.99, else -1
+#
+# Four decisions are baked in here. Say so and I will change them:
+#
+# 1. **A flat dict**, keyed exactly as the plan's storage layout names the arrays,
+#    so the same word means the same thing in memory, on disk and in the summary.
+# 2. **float64 in memory.** The plan stores float32; that cast belongs to the
+#    writer, in one place. Keeping the clip lossless means the tick-alignment test
+#    below can assert *exact* equality rather than a tolerance, which is a much
+#    stronger claim.
+# 3. **Keyword-only sizing arguments.** `n_slots`, `n_live` and `n_ticks` are three
+#    ints in a row. Passed positionally, swapping any two runs perfectly and yields
+#    a wrong dataset — the same failure that put eleven positional floats into
+#    `step` and cost a refactor to undo.
+# 4. **`kind` has no tick axis.** Nothing in `SPEC.md` changes an entity's type
+#    mid-clip; `mask` carries the tick axis because §6.2 drops a bird mid-flight.
+# """
+#
+# import numpy as np
+# import pytest
+#
+# from boids import (calculate_alignment, calculate_cohesion,
+#                    calculate_separation, velocity_capper)
+# from world import PHYSICS_CRUISING
+#
+# generate = pytest.importorskip(
+#     "generate",
+#     reason="generate.py does not exist yet — this suite is its specification")
+#
+# PHYSICS = PHYSICS_CRUISING      # the shipped config, min_speed = 2.0
+# N_SLOTS = 12
+# N_TICKS = 20                    # short on purpose: contract tests, not rollouts
+#
+#
+# def clip(n_live=N_SLOTS, n_ticks=N_TICKS, seed=0, n_slots=N_SLOTS, physics=PHYSICS):
+#     return generate.generate_clip(physics, n_slots=n_slots, n_live=n_live,
+#                                   n_ticks=n_ticks, seed=seed)
+#
+#
+# def polarisation(velocities):
+#     """Length of the mean unit heading: 0 is chaos, 1 is one flock."""
+#     speeds = np.linalg.norm(velocities, axis=1, keepdims=True)
+#     return np.linalg.norm((velocities / np.where(speeds == 0, 1, speeds)).mean(axis=0))
+#
+#
+# # --- the shape contract ------------------------------------------------------
+#
+# def test_the_shape_contract():
+#     """One more state than there are forces, and the asymmetry stays visible.
+#
+#     n_ticks steps produce n_ticks force sets and n_ticks + 1 states. Padding the
+#     force arrays to match would fabricate a label for tick 0, where no force has
+#     been computed yet.
+#     """
+#     c = clip()
+#
+#     assert c["positions"].shape == (N_TICKS + 1, N_SLOTS, 2)
+#     assert c["velocities"].shape == (N_TICKS + 1, N_SLOTS, 2)
+#     for rule in ("separation", "alignment", "cohesion"):
+#         assert c[rule].shape == (N_TICKS, N_SLOTS, 2), rule
+#     assert c["mask"].shape == (N_TICKS + 1, N_SLOTS)
+#     assert c["kind"].shape == (N_SLOTS,)
+#     assert isinstance(int(c["settle_tick"]), int)
+#
+#
+# def test_arrays_are_float64_in_memory():
+#     """float32 is the writer's decision, made once, at the point of saving.
+#
+#     Casting here would lose precision before anything has been written, and
+#     would weaken the tick-alignment test from exact equality to a tolerance.
+#     """
+#     c = clip()
+#
+#     for key in ("positions", "velocities", "separation", "alignment", "cohesion"):
+#         assert c[key].dtype == np.float64, f"{key} is {c[key].dtype}"
+#     assert c["mask"].dtype == np.bool_
+#     assert c["kind"].dtype == np.int8
+#
+#
+# def test_the_sizing_arguments_are_keyword_only():
+#     """Three ints in a row is a transposition waiting to happen.
+#
+#     `generate_clip(physics, 12, 10, 300, 0)` and `(physics, 10, 12, 300, 0)`
+#     both run. One of them silently produces a clip with more live birds than
+#     slots, or a differently shaped world. Keywords make it impossible rather
+#     than unlikely.
+#     """
+#     with pytest.raises(TypeError):
+#         generate.generate_clip(PHYSICS, N_SLOTS, N_SLOTS, N_TICKS, 0)
+#
+#
+# # --- the two invariants that can silently corrupt every label ----------------
+#
+# def test_forces_produce_the_next_velocity_exactly():
+#     """Tick alignment, stated as an equation.
+#
+#     `forces[t]` must be what acted on `velocities[t]` to give `velocities[t+1]`.
+#     Record them one iteration apart and every label in the dataset describes the
+#     wrong state — and the result still looks entirely plausible, because the
+#     physics is self-consistent, just shifted.
+#
+#     Exact rather than approximate: same operations, same order, same float64
+#     values, so any drift here means something was recomputed rather than
+#     recorded.
+#     """
+#     c = clip()
+#     total = c["separation"] + c["alignment"] + c["cohesion"]
+#
+#     for t in range(N_TICKS):
+#         for i in range(N_SLOTS):
+#             np.testing.assert_array_equal(
+#                 velocity_capper(c["velocities"][t][i] + total[t][i] * PHYSICS.dt,
+#                                 PHYSICS.max_speed, PHYSICS.min_speed),
+#                 c["velocities"][t + 1][i],
+#                 err_msg=f"tick {t}, slot {i}: forces do not produce the next velocity")
+#
+#
+# def test_forces_are_the_rules_applied_to_the_state_at_that_tick():
+#     """The strongest statement available about the labels.
+#
+#     Each recorded force must equal its own rule function, at its own radius,
+#     times its own weight, evaluated on the state stored at the *same* index.
+#     That pins the rule, the constant, the weight, the slot index and the tick
+#     together. Nothing else can: forces taken from the following state still
+#     satisfy the equation above, because that only checks self-consistency.
+#     """
+#     c = clip()
+#     ph = PHYSICS
+#
+#     for t in (0, N_TICKS // 2, N_TICKS - 1):
+#         positions, velocities = c["positions"][t], c["velocities"][t]
+#         for i in range(N_SLOTS):
+#             np.testing.assert_allclose(
+#                 c["separation"][t][i],
+#                 ph.w_sep * calculate_separation(i, positions, ph.separation_radius,
+#                                                 ph.bounds, ph.sep_force_cap),
+#                 err_msg=f"separation label wrong at tick {t}, slot {i}")
+#             np.testing.assert_allclose(
+#                 c["alignment"][t][i],
+#                 ph.w_ali * calculate_alignment(i, positions, velocities,
+#                                                ph.alignment_radius, ph.bounds),
+#                 err_msg=f"alignment label wrong at tick {t}, slot {i}")
+#             np.testing.assert_allclose(
+#                 c["cohesion"][t][i],
+#                 ph.w_coh * calculate_cohesion(i, positions, ph.cohesion_radius,
+#                                               ph.bounds),
+#                 err_msg=f"cohesion label wrong at tick {t}, slot {i}")
+#
+#     for rule in ("separation", "alignment", "cohesion"):
+#         assert np.linalg.norm(c[rule], axis=2).max() > 0, f"{rule} never fired"
+#
+#
+# # --- the initial state must be one the simulator could have produced --------
+#
+# def test_initial_velocities_are_legal():
+#     """Tick 0 is a state, and it has to obey the same clamp as every other.
+#
+#     `tests/world.py:random_flock` draws velocity components uniform in
+#     ±max_speed, which puts 33.2% of its birds outside `[min_speed, max_speed]`
+#     (200 seeds × 12 birds). That is deliberate there — it exercises the clamp.
+#     Here it would write a first row the simulator can never reach.
+#
+#     Draw a heading uniform in [0, 2π) and a speed uniform in the clamp instead.
+#     """
+#     speeds = np.linalg.norm(clip()["velocities"][0], axis=1)
+#
+#     assert speeds.min() >= PHYSICS.min_speed - 1e-12
+#     assert speeds.max() <= PHYSICS.max_speed + 1e-12
+#
+#
+# def test_headings_are_not_all_the_same_at_tick_zero():
+#     """A premise guard for the test above.
+#
+#     Clamping every initial speed to exactly `min_speed` would satisfy the
+#     previous test while producing a degenerate flock. Speeds should vary, and
+#     headings should cover the circle rather than clustering.
+#     """
+#     velocities = clip(n_ticks=1)["velocities"][0]
+#
+#     assert np.std(np.linalg.norm(velocities, axis=1)) > 0.1
+#     assert polarisation(velocities) < 0.9
+#
+#
+# def test_the_world_invariants_hold_at_every_tick():
+#     c = clip()
+#     live = c["mask"]
+#
+#     for t in range(N_TICKS + 1):
+#         positions = c["positions"][t][live[t]]
+#         speeds = np.linalg.norm(c["velocities"][t][live[t]], axis=1)
+#         assert np.all(positions >= 0.0) and np.all(positions < PHYSICS.bounds), t
+#         assert speeds.min() >= PHYSICS.min_speed - 1e-9, t
+#         assert speeds.max() <= PHYSICS.max_speed + 1e-9, t
+#
+#
+# def test_no_nan_in_live_slots():
+#     c = clip()
+#     live = c["mask"]
+#
+#     assert not np.isnan(c["positions"][live]).any()
+#     assert not np.isnan(c["velocities"][live]).any()
+#     for rule in ("separation", "alignment", "cohesion"):
+#         assert not np.isnan(c[rule][live[:-1]]).any(), rule
+#
+#
+# # --- slots, masks and the birds that are not there --------------------------
+#
+# def test_every_slot_is_live_when_n_live_equals_n_slots():
+#     c = clip(n_live=N_SLOTS)
+#
+#     assert c["mask"].all()
+#     np.testing.assert_array_equal(c["kind"], np.zeros(N_SLOTS, dtype=np.int8))
+#
+#
+# def test_dead_slots_are_nan_and_exactly_complement_the_mask():
+#     """NaN in dead slots is a checksum on the mask, not decoration.
+#
+#     With zeros you cannot tell a dead slot from a bird at the origin, and 0.0
+#     and -1.0 are both legal velocities. With NaN the two encodings must agree
+#     exactly, and disagreeing is a test failure rather than a silent one.
+#     """
+#     c = clip(n_live=8)
+#     dead = ~c["mask"]
+#
+#     assert dead.any(), "premise failed: nothing was masked off"
+#     np.testing.assert_array_equal(np.isnan(c["positions"][..., 0]), dead)
+#     np.testing.assert_array_equal(np.isnan(c["velocities"][..., 0]), dead)
+#     for rule in ("separation", "alignment", "cohesion"):
+#         np.testing.assert_array_equal(np.isnan(c[rule][..., 0]), dead[:-1], rule)
+#
+#
+# def test_masked_slots_exert_no_force_on_live_birds():
+#     """The quietest way to produce a plausible dataset of the wrong physics.
+#
+#     `step` uses `N = len(positions)`, so a dead slot handed to it is simply a
+#     bird — it pushes on its neighbours and enters their averages, and nothing
+#     raises. Simulate an (n_live, 2) array and scatter into slots afterwards.
+#
+#     This also pins the initialiser's draw *size*: the two clips below only match
+#     if the random stream is identical, which requires drawing exactly `n_live`
+#     positions and velocities rather than `n_slots` with some discarded.
+#     """
+#     wide = clip(n_live=9, n_slots=12, seed=7)
+#     narrow = clip(n_live=9, n_slots=9, seed=7)
+#
+#     live = wide["mask"][0]
+#     np.testing.assert_array_equal(wide["positions"][:, live, :], narrow["positions"])
+#     np.testing.assert_array_equal(wide["velocities"][:, live, :], narrow["velocities"])
+#     for rule in ("separation", "alignment", "cohesion"):
+#         np.testing.assert_array_equal(wide[rule][:, live, :], narrow[rule], rule)
+#
+#
+# # --- reproducibility ---------------------------------------------------------
+#
+# def test_the_same_seed_reproduces_the_clip_bit_for_bit():
+#     """Without this the dataset cannot be regenerated from its own metadata."""
+#     first, second = clip(seed=99), clip(seed=99)
+#
+#     for key in ("positions", "velocities", "separation", "alignment", "cohesion"):
+#         np.testing.assert_array_equal(first[key], second[key], err_msg=key)
+#     np.testing.assert_array_equal(first["mask"], second["mask"])
+#
+#
+# def test_a_seed_sequence_is_accepted_and_distinguishes_clips():
+#     """Clips are seeded by `SeedSequence(entropy=base, spawn_key=(i,))`.
+#
+#     Children of `spawn()` all inherit the parent's `.entropy`, so seeding from
+#     that alone gives every clip the same stream. The spawn_key is what
+#     distinguishes them, and it must survive being passed in here.
+#     """
+#     base = 4242
+#     a = clip(seed=np.random.SeedSequence(entropy=base, spawn_key=(0,)))
+#     b = clip(seed=np.random.SeedSequence(entropy=base, spawn_key=(1,)))
+#     a_again = clip(seed=np.random.SeedSequence(entropy=base, spawn_key=(0,)))
+#
+#     np.testing.assert_array_equal(a["positions"], a_again["positions"])
+#     assert not np.array_equal(a["positions"], b["positions"])
+#
+#
+# def test_different_seeds_give_different_clips():
+#     assert not np.array_equal(clip(seed=1)["positions"], clip(seed=2)["positions"])
+#
+#
+# # --- the settling tick -------------------------------------------------------
+#
+# def test_settle_tick_matches_a_recomputation_from_the_stored_velocities():
+#     """Defined by polarisation, not by a force threshold.
+#
+#     Polarisation is dimensionless and bounded, so it survives any future
+#     reweighting of the rules; an absolute force threshold would need retuning.
+#     """
+#     c = clip(n_ticks=400)
+#     live = c["mask"][0]
+#
+#     expected = -1
+#     for t in range(len(c["velocities"])):
+#         if polarisation(c["velocities"][t][live]) > 0.99:
+#             expected = t
+#             break
+#
+#     assert int(c["settle_tick"]) == expected
+#
+#
+# def test_settle_tick_is_minus_one_when_the_flock_never_orders():
+#     """A clip too short to settle must say so, not report its last tick."""
+#     c = clip(n_ticks=2)
+#     live = c["mask"][0]
+#
+#     assert max(polarisation(c["velocities"][t][live])
+#                for t in range(len(c["velocities"]))) <= 0.99, (
+#         "premise failed: this clip did settle, so it cannot test the -1 case")
+#     assert int(c["settle_tick"]) == -1
+
+# ==========================================================================
+# test_dataset.py
+# ==========================================================================
+# """The contract for the dataset writer — written before it exists.
+#
+# `generate_clip()` is done and green. This file specifies everything that turns
+# clips into a dataset on disk, and it skips as one unit until `build_dataset`
+# exists. Build into it.
+#
+#     build_dataset(physics, *, n_clips, n_slots, n_live, n_ticks,
+#                   base_seed, out_dir, allow_dirty=False) -> pathlib.Path
+#
+#     clip_seed(base_seed, index) -> np.random.SeedSequence
+#     git_is_dirty() -> bool
+#     git_provenance() -> dict   {"commit": str, "tag": str, "dirty": bool}
+#
+# `build_dataset` writes exactly two files into `out_dir` and returns it:
+#
+#     clips.npz     positions    (n_clips, n_ticks+1, n_slots, 2)  float32
+#                   velocities   (n_clips, n_ticks+1, n_slots, 2)  float32
+#                   separation   (n_clips, n_ticks,   n_slots, 2)  float32
+#                   alignment    (n_clips, n_ticks,   n_slots, 2)  float32
+#                   cohesion     (n_clips, n_ticks,   n_slots, 2)  float32
+#                   mask         (n_clips, n_ticks+1, n_slots)     bool
+#                   kind         (n_clips, n_slots)                int8
+#                   settle_tick  (n_clips,)                        int32
+#
+#     config.json   {"physics": {...}, "generation": {...}, "provenance": {...}}
+#
+# Four decisions are baked in here. Say so and I will change them:
+#
+# 1. **No `seeds` column.** A clip is identified by `(base_seed, its index)`:
+#    the base seed is in `config.json` and the index is the array index it already
+#    sits at. The plan left the column optional on the condition that it hold
+#    something that actually regenerates a clip — and a column that must *not*
+#    contain `SeedSequence.entropy`, while looking exactly like it should, is a
+#    trap for whoever reads this next. `clip_seed` is the regeneration path.
+# 2. **The float32 cast lives here and only here.** `generate_clip` stays float64,
+#    so the exact tick-alignment test keeps its exactness and this file measures
+#    what the cast costs.
+# 3. **Fixed filenames**, so nothing downstream takes a path template as an
+#    argument.
+# 4. **`build_dataset` returns the directory, not the arrays.** Reading the
+#    dataset back is `np.load`; a function that both writes and returns would let
+#    every check downstream quietly test the in-memory copy instead of the file.
+# """
+#
+# import json
+# import subprocess
+#
+# import numpy as np
+# import pytest
+#
+# from boids import Physics, velocity_capper
+# from world import PHYSICS_CRUISING
+#
+# generate = pytest.importorskip("generate")
+#
+# pytestmark = pytest.mark.skipif(
+#     not hasattr(generate, "build_dataset"),
+#     reason="generate.build_dataset() does not exist yet — this suite is its "
+#            "specification")
+#
+# PHYSICS = PHYSICS_CRUISING
+# N_CLIPS = 4
+# N_SLOTS = 6
+# N_TICKS = 15                    # short on purpose: contract tests, not rollouts
+# SETTLED_TICKS = 300             # long enough for some flocks to order - see the settled fixture
+# BASE_SEED = 20260902
+#
+#
+# def build(tmp_dir, *, n_live=N_SLOTS, n_clips=N_CLIPS, n_slots=N_SLOTS,
+#           n_ticks=N_TICKS, base_seed=BASE_SEED):
+#     # allow_dirty=True throughout: the working tree during a test run is
+#     # routinely dirty, and refusing to run is the behaviour under test in
+#     # test_a_dirty_tree_is_refused_unless_allowed, not a thing to fight here.
+#     return generate.build_dataset(PHYSICS, n_clips=n_clips, n_slots=n_slots,
+#                                   n_live=n_live, n_ticks=n_ticks,
+#                                   base_seed=base_seed, out_dir=tmp_dir,
+#                                   allow_dirty=True)
+#
+#
+# @pytest.fixture(scope="module")
+# def full(tmp_path_factory):
+#     """Every slot live — the shape the training split has."""
+#     return build(tmp_path_factory.mktemp("full"))
+#
+#
+# @pytest.fixture(scope="module")
+# def settled(tmp_path_factory):
+#     """Long enough that some flocks actually order.
+#
+#     At N_TICKS none of them do, so `settle_tick` is -1 everywhere and any test
+#     of it agrees with itself. Measured at n_slots=6, base seed 20260902: at 15
+#     and at 100 ticks every clip reports -1; at 300 the four clips report
+#     285, -1, 104, 176. Only the last of those can catch a wrong answer.
+#     """
+#     return build(tmp_path_factory.mktemp("settled"), n_ticks=SETTLED_TICKS)
+#
+#
+# @pytest.fixture(scope="module")
+# def partial(tmp_path_factory):
+#     """Four live birds in six slots — the perturbation split's shape."""
+#     return build(tmp_path_factory.mktemp("partial"), n_live=4)
+#
+#
+# def arrays(out_dir):
+#     with np.load(out_dir / "clips.npz") as z:
+#         return {name: z[name] for name in z.files}
+#
+#
+# def config(out_dir):
+#     return json.loads((out_dir / "config.json").read_text())
+#
+#
+# def polarisation(velocities):
+#     """Reimplemented here on purpose — see the note in test_generate.py.
+#
+#     Recomputing an expected value with the implementation's own function proves
+#     only that the function is deterministic. This has to be an independent
+#     statement of the definition or it is evidence of nothing.
+#     """
+#     speeds = np.linalg.norm(velocities, axis=1, keepdims=True)
+#     return np.linalg.norm((velocities / np.where(speeds == 0, 1, speeds)).mean(axis=0))
+#
+#
+# def upcast(a):
+#     """float32 off disk, float64 for arithmetic — the cast is what we measure."""
+#     return a.astype(np.float64)
+#
+#
+# # --- the files ---------------------------------------------------------------
+#
+# def test_the_writer_produces_the_two_files(full):
+#     assert (full / "clips.npz").is_file()
+#     assert (full / "config.json").is_file()
+#
+#
+# def test_build_dataset_returns_the_directory_it_wrote(tmp_path):
+#     assert build(tmp_path) == tmp_path
+#
+#
+# # --- the shape contract, one level up ----------------------------------------
+#
+# def test_the_stored_shapes_carry_a_clips_axis(full):
+#     a = arrays(full)
+#
+#     assert a["positions"].shape == (N_CLIPS, N_TICKS + 1, N_SLOTS, 2)
+#     assert a["velocities"].shape == (N_CLIPS, N_TICKS + 1, N_SLOTS, 2)
+#     assert a["mask"].shape == (N_CLIPS, N_TICKS + 1, N_SLOTS)
+#     assert a["kind"].shape == (N_CLIPS, N_SLOTS)
+#     assert a["settle_tick"].shape == (N_CLIPS,)
+#
+#
+# def test_the_force_arrays_are_never_padded_to_match_the_states(full):
+#     """The 301/300 asymmetry is the truth and belongs in the shape.
+#
+#     Padding forces[0] with zeros to square the arrays off fabricates a label for
+#     a tick where no force has been computed — and it is invisible afterwards,
+#     because zero is a perfectly ordinary force.
+#     """
+#     a = arrays(full)
+#
+#     for rule in ("separation", "alignment", "cohesion"):
+#         assert a[rule].shape == (N_CLIPS, N_TICKS, N_SLOTS, 2), rule
+#
+#
+# def test_the_stored_dtypes(full):
+#     """float32 for the floats, and nothing silently widened back to float64."""
+#     a = arrays(full)
+#
+#     for key in ("positions", "velocities", "separation", "alignment", "cohesion"):
+#         assert a[key].dtype == np.float32, f"{key} is {a[key].dtype}"
+#     assert a["mask"].dtype == np.bool_
+#     assert a["kind"].dtype == np.int8
+#     assert a["settle_tick"].dtype == np.int32
+#
+#
+# def test_kind_is_all_birds_for_now(full):
+#     assert np.array_equal(arrays(full)["kind"], np.zeros((N_CLIPS, N_SLOTS), np.int8))
+#
+#
+# # --- config.json -------------------------------------------------------------
+#
+# def test_the_physics_round_trips_field_for_field(full):
+#     """Values alone do not identify a dataset, but they are half of it.
+#
+#     Reconstructing the dataclass rather than comparing dicts also proves the
+#     stored keys are the field names, so a later rename fails here rather than
+#     quietly producing a config nothing can load.
+#     """
+#     assert Physics(**config(full)["physics"]) == PHYSICS
+#
+#
+# def test_the_generation_parameters_are_recorded(full):
+#     gen = config(full)["generation"]
+#
+#     assert gen["n_clips"] == N_CLIPS
+#     assert gen["n_slots"] == N_SLOTS
+#     assert gen["n_live"] == N_SLOTS
+#     assert gen["n_ticks"] == N_TICKS
+#     assert gen["base_seed"] == BASE_SEED
+#
+#
+# def test_provenance_is_recorded(full):
+#     """The other half. Values say what was asked for; the SHA says what ran.
+#
+#     A dataset generated by code that has since changed is not reproducible from
+#     its parameters, and the failure is silent — the numbers still look fine.
+#     """
+#     prov = config(full)["provenance"]
+#
+#     assert prov["commit"], "no commit SHA recorded"
+#     assert prov["commit"] == subprocess.run(
+#         ["git", "rev-parse", "HEAD"], capture_output=True, text=True,
+#         check=True).stdout.strip()
+#     assert "tag" in prov
+#     assert isinstance(prov["dirty"], bool)
+#
+#
+# def test_the_allow_dirty_flag_is_recorded_even_when_the_tree_is_clean(full):
+#     """Provenance that can be silently wrong is decoration."""
+#     assert config(full)["generation"]["allow_dirty"] is True
+#
+#
+# def test_a_dirty_tree_is_refused_unless_allowed(tmp_path, monkeypatch):
+#     """Refuse by default, and only the flag gets past it.
+#
+#     A dataset generated from uncommitted code records a SHA that does not
+#     describe the code that ran. That is worse than no provenance, because it
+#     reads as trustworthy.
+#     """
+#     monkeypatch.setattr(generate, "git_is_dirty", lambda: True)
+#
+#     with pytest.raises(RuntimeError):
+#         generate.build_dataset(PHYSICS, n_clips=1, n_slots=N_SLOTS,
+#                                n_live=N_SLOTS, n_ticks=2, base_seed=0,
+#                                out_dir=tmp_path)
+#
+#     generate.build_dataset(PHYSICS, n_clips=1, n_slots=N_SLOTS, n_live=N_SLOTS,
+#                            n_ticks=2, base_seed=0, out_dir=tmp_path,
+#                            allow_dirty=True)
+#     assert config(tmp_path)["provenance"]["dirty"] is True
+#
+#
+# # --- the seeds ---------------------------------------------------------------
+#
+# def test_clip_seed_reproduces_the_spawned_child_and_does_not_depend_on_n():
+#     """`SeedSequence(entropy=base, spawn_key=(i,))`, not `spawn(n)[i].entropy`.
+#
+#     Every child of `spawn()` inherits the parent's entropy, so a seeds column
+#     holding `child.entropy` writes the same number into every row and reseeding
+#     from it gives one identical stream for all clips — a different stream from
+#     the one that generated any of them. What identifies a child is the pair
+#     (entropy, spawn_key). Verified equal for two different n, so the identity
+#     does not depend on how many clips were asked for.
+#     """
+#     for n in (4, 9):
+#         for i in range(n):
+#             np.testing.assert_array_equal(
+#                 generate.clip_seed(BASE_SEED, i).generate_state(4),
+#                 np.random.SeedSequence(BASE_SEED).spawn(n)[i].generate_state(4),
+#                 err_msg=f"clip {i} of {n}")
+#
+#
+# def test_clip_seed_gives_every_clip_a_different_stream():
+#     states = {tuple(generate.clip_seed(BASE_SEED, i).generate_state(4))
+#               for i in range(N_CLIPS)}
+#
+#     assert len(states) == N_CLIPS, "some clips share a random stream"
+#
+#
+# def test_a_stored_clip_regenerates_from_the_base_seed_and_its_index(full):
+#     """The claim that makes the seeds column unnecessary.
+#
+#     If this passes, `(base_seed, index)` is enough to reconstruct any clip in
+#     the dataset exactly, and `config.json` plus the array index carry both.
+#     """
+#     a = arrays(full)
+#     index = 2
+#     again = generate.generate_clip(PHYSICS, n_slots=N_SLOTS, n_live=N_SLOTS,
+#                                    n_ticks=N_TICKS,
+#                                    seed=generate.clip_seed(BASE_SEED, index))
+#
+#     for key in ("positions", "velocities", "separation", "alignment", "cohesion"):
+#         np.testing.assert_array_equal(
+#             a[key][index], again[key].astype(np.float32), err_msg=key)
+#     assert int(a["settle_tick"][index]) == again["settle_tick"]
+#
+#
+# def test_the_clips_are_not_all_the_same_flock(full):
+#     """Cheap, and it catches seeding every clip from the base seed itself."""
+#     positions = arrays(full)["positions"]
+#
+#     for i in range(1, N_CLIPS):
+#         assert not np.array_equal(positions[0], positions[i]), f"clip {i} == clip 0"
+#
+#
+# # --- the invariants, restated against what is actually on disk ---------------
+#
+# def test_forces_reconstruct_velocities_after_the_float32_round_trip(full):
+#     """Tick alignment, surviving the cast — the one that matters most here.
+#
+#     Exactness is gone by definition once the arrays are float32, so this is a
+#     tolerance. The measured worst case for this round trip is 2.9e-07, about
+#     2.4x float32 epsilon (tests/test_step.py), so a failure at 1e-6 means
+#     something is misaligned rather than that the bound is tight.
+#
+#     Checked against `velocities[t]` and `velocities[t+1]` on purpose: an
+#     internally consistent but shifted recording passes every check that looks
+#     only at the forces.
+#     """
+#     a = arrays(full)
+#     v = upcast(a["velocities"])
+#     total = upcast(a["separation"]) + upcast(a["alignment"]) + upcast(a["cohesion"])
+#
+#     worst = 0.0
+#     for c in range(N_CLIPS):
+#         for t in range(N_TICKS):
+#             for i in range(N_SLOTS):
+#                 expected = velocity_capper(v[c, t, i] + total[c, t, i] * PHYSICS.dt,
+#                                            PHYSICS.max_speed, PHYSICS.min_speed)
+#                 worst = max(worst, float(np.abs(expected - v[c, t + 1, i]).max()))
+#
+#     assert worst < 1e-6, f"round trip lost {worst:.3e} — more than the cast alone"
+#
+#
+# def test_mask_and_nan_are_exact_complements_on_disk(partial):
+#     """The checksum a mask alone cannot provide.
+#
+#     With zero-filled dead slots there is no way to tell an empty slot from a
+#     bird at the origin, and 0.0 is a legal velocity component too. NaN makes the
+#     two representations checkable against each other, which is why both are
+#     stored.
+#     """
+#     a = arrays(partial)
+#     dead = ~a["mask"]
+#
+#     assert dead.any(), "premise failed: nothing was masked off"
+#     np.testing.assert_array_equal(np.isnan(a["positions"][..., 0]), dead)
+#     np.testing.assert_array_equal(np.isnan(a["velocities"][..., 0]), dead)
+#     for rule in ("separation", "alignment", "cohesion"):
+#         np.testing.assert_array_equal(np.isnan(a[rule][..., 0]), dead[:, :-1], rule)
+#
+#
+# def test_no_nan_in_live_slots(partial):
+#     """NaN shouts on comparisons and whispers on aggregates.
+#
+#     Every check in this file is written over live slots explicitly rather than
+#     trusting NaN to surface a mistake, because `mean()` propagates it in
+#     silence. This test is the one that makes that safe to rely on.
+#     """
+#     a = arrays(partial)
+#     live = a["mask"]
+#
+#     assert not np.isnan(a["positions"][live]).any()
+#     assert not np.isnan(a["velocities"][live]).any()
+#     for rule in ("separation", "alignment", "cohesion"):
+#         assert not np.isnan(a[rule][live[:, :-1]]).any(), rule
+#
+#
+# def test_positions_and_speeds_are_legal_including_tick_0(full):
+#     """Tick 0 is the one the simulator never produced, so it is the one to check.
+#
+#     The upper bound on position is closed rather than half-open here on purpose:
+#     a float64 coordinate a hair under `bounds` can round *up* to exactly
+#     `bounds` in float32. That is a property of the cast, not a wrapping bug, and
+#     asserting `< bounds` would make this test fail at random.
+#     """
+#     a = arrays(full)
+#     positions = upcast(a["positions"])[a["mask"]]
+#     speeds = np.linalg.norm(upcast(a["velocities"])[a["mask"]], axis=-1)
+#
+#     assert positions.min() >= 0.0
+#     assert positions.max() <= PHYSICS.bounds
+#     assert speeds.min() >= PHYSICS.min_speed - 1e-5, f"slowest {speeds.min()}"
+#     assert speeds.max() <= PHYSICS.max_speed + 1e-5, f"fastest {speeds.max()}"
+#
+#
+# def test_settle_tick_matches_a_recomputation_from_the_stored_velocities(settled):
+#     """Recomputed from the file, not from the generator's own bookkeeping.
+#
+#     Deliberately on the long fixture. At the short one no flock reaches
+#     polarisation 0.99, so both sides of the comparison are -1 and an
+#     implementation that never looks at the velocities passes - which is what
+#     this test did until the premise assertion below was added.
+#     """
+#     a = arrays(settled)
+#
+#     computed = []
+#     for c in range(N_CLIPS):
+#         live = a["mask"][c, 0]
+#         expected = -1
+#         for t in range(SETTLED_TICKS + 1):
+#             if polarisation(upcast(a["velocities"][c, t][live])) > 0.99:
+#                 expected = t
+#                 break
+#         computed.append(expected)
+#         assert int(a["settle_tick"][c]) == expected, f"clip {c}"
+#
+#     assert any(t != -1 for t in computed), (
+#         "premise failed: no clip settled, so this test compared -1 with -1 and "
+#         "would pass against a hardcoded answer")
