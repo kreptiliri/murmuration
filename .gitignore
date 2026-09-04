@@ -9,6 +9,7 @@ data/
 *.npz
 
 temp.txt
+a_small_roadmapforme.txt
 .pytest_cache/
 
 # scratch views, not deliverables
