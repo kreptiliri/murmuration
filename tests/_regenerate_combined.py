@@ -22,7 +22,8 @@ FILES = ["world.py",
          "simulator/test_step.py",
          "simulator/test_rollout.py",
          "dataset/test_generate.py",
-         "dataset/test_dataset.py"]
+         "dataset/test_dataset.py",
+         "dataset/test_windows.py"]
 
 RULE = "# " + "=" * 74
 

@@ -22,6 +22,12 @@ one above it holds:
 | `dataset/` | `test_generate.py` | `polarisation()`, and `generate_clip()`: one clip in memory | 24 |
 | | `test_dataset.py` | `build_dataset()`: many clips, on disk, with provenance | 28 |
 
+Plus `dataset/test_windows.py`: 15 tests specifying `build_windows()`, the
+function that turns whole clips into fixed-length training windows. It skips as
+one unit until `windows.py` exists, so it is not counted above. It is the
+specification for that function, not a description of one - read its module
+docstring before writing anything that produces training tensors.
+
 `forces/` is the one to be most careful with. Those three files test the
 functions whose output becomes the ground-truth label for every probe and every
 ablation in the project; a silent error there corrupts every downstream result
