@@ -14,9 +14,15 @@ HERE = Path(__file__).resolve().parent
 OUT = HERE / "_all_tests_combined.py"
 
 # Build order, which is also the order the project was written in.
-FILES = ["world.py", "test_geometry.py", "test_separation.py",
-         "test_alignment.py", "test_cohesion.py", "test_step.py",
-         "test_rollout.py", "test_generate.py", "test_dataset.py"]
+FILES = ["world.py",
+         "primitives/test_geometry.py",
+         "forces/test_separation.py",
+         "forces/test_alignment.py",
+         "forces/test_cohesion.py",
+         "simulator/test_step.py",
+         "simulator/test_rollout.py",
+         "dataset/test_generate.py",
+         "dataset/test_dataset.py"]
 
 RULE = "# " + "=" * 74
 

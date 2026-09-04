@@ -1,33 +1,42 @@
 # The test suite
 
-118 tests, ~7 seconds. `pytest -q` from the repo root.
+133 tests, ~7 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
 raises nothing, so this suite is written to catch errors that *look fine* —
 plausible numbers, no exception, no NaN — rather than crashes.
 
-| file | what it covers | tests |
-|---|---|---|
-| `test_geometry.py` | torus distance, the two-sided speed clamp, `Physics` validation | 21 |
-| `test_separation.py` | `calculate_separation` | 10 |
-| `test_alignment.py` | `calculate_alignment` | 6 |
-| `test_cohesion.py` | `calculate_cohesion` | 11 |
-| `test_step.py` | one tick: the integrator, the constants, the label invariants | 20 |
-| `test_rollout.py` | hundreds of ticks: what only shows up over time | 13 |
-| `test_generate.py` | `generate_clip()`: one clip in memory | 17 |
-| `test_dataset.py` | `build_dataset()`: many clips, on disk, with provenance | 20 |
+Grouped by what they cover, not scattered in one directory. The four folders
+are the order the project was built in, and each one only makes sense once the
+one above it holds:
+
+| folder | file | what it covers | tests |
+|---|---|---|---|
+| `primitives/` | `test_geometry.py` | torus distance, the two-sided speed clamp, `Physics` validation | 21 |
+| `forces/` | `test_separation.py` | `calculate_separation` | 10 |
+| | `test_alignment.py` | `calculate_alignment` | 6 |
+| | `test_cohesion.py` | `calculate_cohesion` | 11 |
+| `simulator/` | `test_step.py` | one tick: the integrator, the constants, the label invariants | 20 |
+| | `test_rollout.py` | hundreds of ticks: what only shows up over time | 13 |
+| `dataset/` | `test_generate.py` | `polarisation()`, and `generate_clip()`: one clip in memory | 24 |
+| | `test_dataset.py` | `build_dataset()`: many clips, on disk, with provenance | 28 |
+
+`forces/` is the one to be most careful with. Those three files test the
+functions whose output becomes the ground-truth label for every probe and every
+ablation in the project; a silent error there corrupts every downstream result
+and raises nothing.
 
 ## What "checked" means, per file
 
 The distinction matters, because the two words below are not equally strong.
 
-**The six simulator files are mutation-checked.** Every bug a test claims to
+**The six simulator files** (`primitives/`, `forces/`, `simulator/`) **are mutation-checked.** Every bug a test claims to
 catch was introduced into `boids.py` deliberately and the test was watched
 failing. A test nobody has watched fail is a test nobody has tested. Five were
 written *because* they caught a real bug in real code, and those are marked.
 
-**The two dataset files were written before the code they test**, as its
+**The two `dataset/` files were written before the code they test**, as its
 specification, and the implementation was built into them. That is good
 evidence of a different kind — the interface could not be bent to fit whatever
 got written — but it is not the same as watching each one fail for the right
@@ -57,7 +66,7 @@ test, and commit the result alongside.
 
 ---
 
-## test_geometry.py
+## primitives/test_geometry.py
 
 The primitives every rule is built on.
 
@@ -85,7 +94,7 @@ The primitives every rule is built on.
 | `physics_rejects_nonsense_scales` | negative or zero `bounds`, `dt`, `max_speed` |
 | `the_test_baseline_tracks_the_shipped_config` | `world.py` restating a constant as a literal instead of deriving it from `Physics()`. The two files had already drifted once — alignment_radius 35.0 against 30.0. Checks the module-level names too, not just the config objects: the first version of this test checked only the objects and a mutation reintroducing the literal passed all 81 tests |
 
-## test_separation.py
+## forces/test_separation.py
 
 Push away from close neighbours, `1/d`, capped.
 
@@ -102,7 +111,7 @@ Push away from close neighbours, `1/d`, capped.
 | `force_cap_limits_magnitude_without_rotating_it` | clamping `dist` instead of the magnitude — `offset/dist` stops being a unit vector, so the "cap of 1.0" yields 0.5 and repulsion *grows* with distance |
 | `force_cap_leaves_distant_neighbours_alone` | a cap quietly rescaling every label in the dataset |
 
-## test_alignment.py
+## forces/test_alignment.py
 
 Match the mean heading of nearby neighbours.
 
@@ -115,7 +124,7 @@ Match the mean heading of nearby neighbours.
 | `alignment_neighbour_across_the_seam_counts` | the seam |
 | `alignment_isolated_bird_feels_nothing` | returning `−my_v` for an empty neighbourhood, which would make emptiness a brake |
 
-## test_cohesion.py
+## forces/test_cohesion.py
 
 Steer toward the local centre of mass. The most dangerous rule to get wrong.
 
@@ -133,7 +142,7 @@ Steer toward the local centre of mass. The most dangerous rule to get wrong.
 | `cohesion_isolated_bird_feels_nothing_and_divides_by_nothing` | **a real bug this caught**: the zero-guard placed *after* `total / neighbor_count`, so an isolated bird computed `0/0` → `[nan, nan]` plus a RuntimeWarning before returning the right answer. Under `np.seterr(all='raise')` that is a hard crash mid-run |
 | `cohesion_single_bird_world` | the degenerate case |
 
-## test_step.py
+## simulator/test_step.py
 
 One tick: the integrator, the constants, and the invariants the labels rest on.
 
@@ -160,7 +169,7 @@ One tick: the integrator, the constants, and the invariants the labels rest on.
 | `step_does_not_mutate_its_inputs` | double-buffering: `positions %= bounds` done in place would compute some birds' forces against a half-updated world, and the reconstruction test would keep passing |
 | `step_records_all_three_rules_separately` | two keys holding the same array — probes trained to distinguish rules the simulator never separated |
 
-## test_rollout.py
+## simulator/test_rollout.py
 
 Hundreds of ticks. A different class of bug lives here.
 
@@ -180,7 +189,7 @@ Hundreds of ticks. A different class of bug lives here.
 | `two_birds_beyond_every_radius_just_drift` | a rule firing when nothing is in range |
 | `the_shipped_defaults_produce_a_sane_rollout` | `Physics()` with no arguments — what a careless caller gets, and what every other test overrides |
 
-## test_generate.py
+## dataset/test_generate.py
 
 `generate_clip()` — one clip's arrays in memory, no I/O. Written before the
 function existed; its module docstring is the interface contract, including
@@ -188,6 +197,13 @@ four decisions that were made rather than derived.
 
 | test | catches |
 |---|---|
+| `polarisation_is_one_when_every_bird_flies_the_same_way` | the ends of the scale being wrong |
+| `polarisation_ignores_speed_entirely` | **the bug this function actually had.** The first version was `\|mean velocity\| / mean speed`, which lets a fast bird outvote a slow one |
+| `polarisation_is_zero_for_two_birds_flying_at_each_other` | the same bug from the other end: those two score 0.43 under the old definition and 0 under this one |
+| `polarisation_of_perpendicular_headings` | a value that is neither 0 nor 1, so the middle of the scale is checked and not only its ends |
+| `polarisation_survives_a_stationary_bird` | dividing by a zero speed. `min_speed` keeps it out of generated clips, but the function is called on hand-built flocks, and a NaN would propagate through every mean downstream rather than raising |
+| `polarisation_does_not_depend_on_flock_orientation` | an implementation that is accidentally axis-dependent - rotating a whole flock cannot change how ordered it is |
+| `more_live_birds_than_slots_is_refused` | a flock silently truncated to fit the slots it was given |
 | `the_shape_contract` | the 301/300 asymmetry collapsing. `n_ticks` steps give `n_ticks` force sets and `n_ticks + 1` states; padding the forces to square them off fabricates a label for tick 0, and zero is an ordinary force so nothing looks wrong afterwards |
 | `arrays_are_float64_in_memory` | the storage cast creeping upstream, which would silently weaken the exact tick-alignment test below into a tolerance |
 | `the_sizing_arguments_are_keyword_only` | `n_slots`, `n_live`, `n_ticks` passed positionally. Any two swapped runs perfectly and yields a differently shaped world |
@@ -206,7 +222,7 @@ four decisions that were made rather than derived.
 | `settle_tick_matches_a_recomputation_from_the_stored_velocities` | a settling tick that does not describe the velocities stored beside it. Run at 400 ticks so the answer is not trivially `-1` |
 | `settle_tick_is_minus_one_when_the_flock_never_orders` | the other branch: a clip that never settles reporting a tick anyway |
 
-## test_dataset.py
+## dataset/test_dataset.py
 
 `build_dataset()` — many clips, written to `clips.npz` and `config.json`. Also
 written before the code. Every check is over live slots explicitly, never

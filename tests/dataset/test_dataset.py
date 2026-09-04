@@ -240,6 +240,60 @@ def test_a_dirty_tree_is_refused_unless_allowed(tmp_path, monkeypatch):
     assert config(tmp_path)["provenance"]["dirty"] is True
 
 
+# --- the git helpers ---------------------------------------------------------
+
+def test_git_is_dirty_agrees_with_git_itself():
+    """Compared against the command, not against a remembered answer."""
+    porcelain = subprocess.run(["git", "status", "--porcelain"], capture_output=True,
+                               text=True, check=True).stdout.strip()
+
+    assert generate.git_is_dirty() == bool(porcelain)
+
+
+def test_git_is_dirty_returns_a_real_bool():
+    """`if dirty` would be happy with the raw porcelain string too.
+
+    It is written into config.json, where a JSON string "" or " M generate.py"
+    in place of true/false would be read back by anything downstream as
+    truthy - an empty string being falsey is not something to rely on across a
+    serialisation boundary.
+    """
+    assert isinstance(generate.git_is_dirty(), bool)
+
+
+def test_provenance_describes_the_code_not_the_callers_directory(tmp_path, monkeypatch):
+    """The reason `_git` passes `-C` at generate.py's own directory.
+
+    Without it, git runs wherever the caller happened to be standing: a
+    different repo's SHA, or a crash, depending on where that is. The SHA is
+    supposed to identify the code that ran.
+    """
+    expected = generate.git_provenance()["commit"]
+    monkeypatch.chdir(tmp_path)          #not a git repository at all
+
+    assert generate.git_provenance()["commit"] == expected
+
+
+def test_provenance_commit_is_a_full_sha():
+    commit = generate.git_provenance()["commit"]
+
+    assert len(commit) == 40, commit
+    assert all(c in "0123456789abcdef" for c in commit), commit
+
+
+def test_provenance_tag_is_never_empty():
+    """`git describe --tags --always` degrades to a short SHA rather than blank.
+
+    A bare tag lookup returns nothing at an untagged HEAD, and an empty string
+    in config.json reads as "no tag" rather than "several commits past sim-v1".
+    """
+    assert generate.git_provenance()["tag"].strip()
+
+
+def test_provenance_dirty_matches_the_helper():
+    assert generate.git_provenance()["dirty"] == generate.git_is_dirty()
+
+
 # --- the seeds ---------------------------------------------------------------
 
 def test_clip_seed_reproduces_the_spawned_child_and_does_not_depend_on_n():
@@ -372,6 +426,45 @@ def test_positions_and_speeds_are_legal_including_tick_0(full):
     assert positions.max() <= PHYSICS.bounds
     assert speeds.min() >= PHYSICS.min_speed - 1e-5, f"slowest {speeds.min()}"
     assert speeds.max() <= PHYSICS.max_speed + 1e-5, f"fastest {speeds.max()}"
+
+
+def test_a_clip_with_no_ticks_still_has_a_legal_shape(tmp_path):
+    """n_ticks=0 takes its own branch in the writer and nothing exercised it.
+
+    One state, no forces. The degenerate case is worth pinning because the
+    branch that builds empty force arrays is the one place the 301/300
+    asymmetry is written out by hand rather than falling out of the loop.
+    """
+    out = build(tmp_path, n_clips=1, n_ticks=0)
+    a = arrays(out)
+
+    assert a["positions"].shape == (1, 1, N_SLOTS, 2)
+    for rule in ("separation", "alignment", "cohesion"):
+        assert a[rule].shape == (1, 0, N_SLOTS, 2), rule
+    assert int(a["settle_tick"][0]) in (-1, 0)
+
+
+def test_thirty_clips_are_all_legal(tmp_path):
+    """Breadth rather than depth: one seed proves nothing about the others.
+
+    Every measured claim in this project that turned out wrong was generalised
+    from a single seed. This asserts nothing about the *values* - those are what
+    the summary report is for - only that no clip in a larger sample violates
+    the world's own rules.
+    """
+    out = build(tmp_path, n_clips=30, n_ticks=25)
+    a = arrays(out)
+    live = a["mask"]
+
+    assert not np.isnan(a["positions"][live]).any()
+    positions = upcast(a["positions"])[live]
+    speeds = np.linalg.norm(upcast(a["velocities"])[live], axis=-1)
+
+    assert positions.min() >= 0.0 and positions.max() <= PHYSICS.bounds
+    assert speeds.min() >= PHYSICS.min_speed - 1e-5
+    assert speeds.max() <= PHYSICS.max_speed + 1e-5
+    assert np.all(a["settle_tick"] >= -1) and np.all(a["settle_tick"] <= 25)
+    np.testing.assert_array_equal(np.isnan(a["positions"][..., 0]), ~live)
 
 
 def test_settle_tick_matches_a_recomputation_from_the_stored_velocities(settled):

@@ -62,6 +62,69 @@ def polarisation(velocities):
     return np.linalg.norm((velocities / np.where(speeds == 0, 1, speeds)).mean(axis=0))
 
 
+# --- polarisation ------------------------------------------------------------
+
+def test_polarisation_is_one_when_every_bird_flies_the_same_way():
+    v = np.array([[3.0, 0.0], [3.0, 0.0], [3.0, 0.0]])
+
+    assert generate.polarisation(v) == pytest.approx(1.0)
+
+
+def test_polarisation_ignores_speed_entirely():
+    """The definition is the mean *unit* heading, so speed must not vote.
+
+    Same three headings as above at wildly different speeds. If this returns
+    anything but 1.0, the function is averaging velocities rather than
+    directions.
+    """
+    v = np.array([[2.0, 0.0], [5.0, 0.0], [2.5, 0.0]])
+
+    assert generate.polarisation(v) == pytest.approx(1.0)
+
+
+def test_polarisation_is_zero_for_two_birds_flying_at_each_other():
+    """The regression test for a bug this function actually had.
+
+    The first implementation was |mean velocity| / mean speed, which lets a fast
+    bird outvote a slow one: these two score 0.43 under it and 0.0 under the
+    definition. Two birds flying directly at each other are not 43% ordered.
+    """
+    v = np.array([[5.0, 0.0], [-2.0, 0.0]])
+
+    assert generate.polarisation(v) == pytest.approx(0.0)
+
+
+def test_polarisation_of_perpendicular_headings():
+    """A value that is neither 0 nor 1, so the scale is checked and not just its ends."""
+    v = np.array([[4.0, 0.0], [0.0, 1.0]])
+
+    assert generate.polarisation(v) == pytest.approx(1 / np.sqrt(2))
+
+
+def test_polarisation_survives_a_stationary_bird():
+    """Normalising divides by each bird's speed, and a still bird's speed is 0.
+
+    min_speed keeps this out of generated clips, but the function is called on
+    hand-built flocks too, and a NaN here would propagate silently through every
+    mean downstream rather than raising.
+    """
+    v = np.array([[3.0, 0.0], [0.0, 0.0]])
+    result = generate.polarisation(v)
+
+    assert not np.isnan(result)
+    assert result == pytest.approx(0.5), "the still bird should count as no vote, not as a heading"
+
+
+def test_polarisation_does_not_depend_on_flock_orientation():
+    """Rotating the whole flock cannot change how ordered it is."""
+    v = np.array([[2.0, 1.0], [3.0, -1.0], [2.5, 0.5]])
+    angle = 0.7
+    rotation = np.array([[np.cos(angle), -np.sin(angle)],
+                         [np.sin(angle), np.cos(angle)]])
+
+    assert generate.polarisation(v @ rotation.T) == pytest.approx(generate.polarisation(v))
+
+
 # --- the shape contract ------------------------------------------------------
 
 def test_the_shape_contract():
@@ -94,6 +157,12 @@ def test_arrays_are_float64_in_memory():
         assert c[key].dtype == np.float64, f"{key} is {c[key].dtype}"
     assert c["mask"].dtype == np.bool_
     assert c["kind"].dtype == np.int8
+
+
+def test_more_live_birds_than_slots_is_refused():
+    """Nowhere to put them. Better a loud failure than a truncated flock."""
+    with pytest.raises((ValueError, AssertionError)):
+        clip(n_live=N_SLOTS + 1, n_slots=N_SLOTS)
 
 
 def test_the_sizing_arguments_are_keyword_only():
