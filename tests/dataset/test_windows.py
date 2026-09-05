@@ -212,8 +212,10 @@ def test_the_target_agrees_with_the_torus_delta_of_the_positions(dataset):
         for offset in (0, 91, per_clip - 1):
             last_tick = offset + CONTEXT - 1
             for i in range(N_SLOTS):
-                expected = get_torus(positions[c, last_tick, i],
-                                     positions[c, last_tick + 1, i],
+                #get_torus(a, b) returns a - b, so the later position comes
+                #first to get the displacement rather than its negative
+                expected = get_torus(positions[c, last_tick + 1, i],
+                                     positions[c, last_tick, i],
                                      PHYSICS.bounds)
                 np.testing.assert_allclose(
                     targets[c * per_clip + offset].reshape(N_SLOTS, 2)[i],
