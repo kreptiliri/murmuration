@@ -472,6 +472,24 @@
 #     )
 #
 #     np.testing.assert_allclose(force, [-0.2, 0.0])
+#
+# def test_a_coincident_neighbour_is_ignored_not_infinite():
+#     """Two birds at exactly the same position are 0 apart, where 1/d is
+#     undefined. The `0 < dist` guard skips them, so they contribute nothing —
+#     neither an infinity, a NaN, nor the capped magnitude in an arbitrary
+#     direction.
+#
+#     Pinned because it is specified nowhere else and it sits on the label path:
+#     admitting coincident birds would change recorded forces without raising,
+#     and a divide-by-zero here would poison the clip from that tick onwards.
+#     """
+#     positions = np.array([[10.0, 10.0],
+#                           [10.0, 10.0]])
+#
+#     force = calculate_separation(0, positions, SEPARATION_RADIUS, BOUNDS)
+#
+#     assert not np.isnan(force).any(), "NaN would silently poison every label"
+#     np.testing.assert_array_equal(force, [0.0, 0.0])
 
 # ==========================================================================
 # forces/test_alignment.py
@@ -2536,10 +2554,11 @@
 #     build_windows(dataset_dir, *, context, clips=None) -> (inputs, targets)
 #
 #     inputs   (n_windows, context, n_slots * 2)  float32  raw positions
-#     targets  (n_windows, n_slots * 2)           float32  displacement, next tick
+#     targets  (n_windows, n_slots * 2)           float32  velocity change, next tick
 #
 # One window is `context` consecutive ticks from a single clip; its target is how
-# far each bird moves on the tick after the window ends.
+# much each bird's velocity changes on the tick after the window ends -
+# `velocities[t+1] - velocities[t]`.
 #
 # Seven decisions are baked in here. Say so and I will change them:
 #
@@ -2547,15 +2566,20 @@
 #    values". Velocity is recoverable from consecutive ticks, so feeding it too
 #    would hand the model a quantity it could derive — and quietly change what a
 #    probe for "does it represent velocity" is even asking.
-# 2. **The target is a displacement, not the next position.** Predicting the next
-#    position is answerable to R² = 1.000000 by copying the input: a bird moves
-#    0.2–0.5 units per tick in a 100-unit world. `NOTES.md` records that baseline.
-#    A displacement of ~0.3 cannot be produced without modelling the forces.
-# 3. **The displacement comes from `velocities[t+1] * dt`, never from subtracting
-#    two stored positions.** Subtraction is wrong across the seam by exactly
-#    `bounds`, and lossy near 100.0 in float32. The stored velocity carries it
-#    exactly, and `step` advances position with the *new* velocity, so
-#    `v[t+1] * dt` is the displacement by construction.
+# 2. **The target is the change in velocity, not the next position and not the
+#    displacement.** Both of those are answerable by copying. A do-nothing
+#    predictor scores R² = 1.000000 against the next position; a predictor that
+#    repeats the previous move scores **+0.999809** against the displacement,
+#    leaving 0.019% of the variance for anything a model might actually learn.
+#    Against the velocity change the same copier scores **+0.924143** - still a
+#    lot, which is why `NOTES.md` also requires reporting skill against
+#    persistence rather than against the mean, but four hundred times more room.
+#    Measured over 200 clips, 300 ticks, N=12, context 8.
+# 3. **The target comes from the stored velocities, never from positions.**
+#    `velocities[t+1] - velocities[t]`. Velocities do not wrap, so unlike a
+#    displacement target this one has no seam in it at all. Note the target is
+#    *not* the force: the speed floor fires on 31% of bird-ticks, so it is
+#    force-then-clamped, and `corr(dv, force*dt) = 0.765`.
 # 4. **Raw coordinates, not normalised.** Scaling is the model's business, and a
 #    loader that silently divides by 100 makes every later "what units is this
 #    probe in" question harder than it needs to be.
@@ -2572,7 +2596,6 @@
 # import numpy as np
 # import pytest
 #
-# from boids import get_torus
 # from world import PHYSICS_CRUISING
 #
 # generate = pytest.importorskip("generate")
@@ -2583,7 +2606,7 @@
 # PHYSICS = PHYSICS_CRUISING
 # N_CLIPS = 4
 # N_SLOTS = 6
-# N_TICKS = 150               # long enough that some birds cross the seam
+# N_TICKS = 150 # long enough that some birds cross the seam
 # CONTEXT = 8
 # BASE_SEED = 20260904
 #
@@ -2670,26 +2693,33 @@
 #
 # # --- trap 2: the target -------------------------------------------------------
 #
-# def test_the_target_is_a_displacement_not_the_next_position(dataset):
-#     """The leak, stated as a bound.
+# def test_the_target_is_neither_a_position_nor_a_displacement(dataset):
+#     """Both of the rejected targets, ruled out by their own arithmetic.
 #
-#     Every target must be a per-tick move: at most `max_speed * dt` = 0.5 in this
-#     config. A next-position target would be somewhere in [0, 100), so this fails
-#     immediately and loudly rather than after a training run that looked great.
+#     A position target lands in [0, 100). A displacement target has every entry
+#     between min_speed*dt and max_speed*dt, so its magnitude is never below 0.2.
+#     A velocity change is bounded by 2*max_speed and routinely near zero - a
+#     settled bird barely changes velocity at all.
 #     """
+#     a = arrays(dataset)
 #     _, targets = windows.build_windows(dataset, context=CONTEXT)
-#     step_sizes = np.linalg.norm(targets.reshape(len(targets), N_SLOTS, 2), axis=-1)
+#     sizes = np.linalg.norm(targets.reshape(len(targets), N_SLOTS, 2), axis=-1)
 #
-#     assert step_sizes.max() <= PHYSICS.max_speed * PHYSICS.dt + 1e-5
-#     assert step_sizes.min() >= PHYSICS.min_speed * PHYSICS.dt - 1e-5
+#     assert sizes.max() <= 2 * PHYSICS.max_speed
+#     assert sizes.min() < PHYSICS.min_speed * PHYSICS.dt, (
+#         "no target smaller than one tick of travel - this looks like a "
+#         "displacement target, not a velocity change")
+#
+#     displacement = a["velocities"][:, CONTEXT] * PHYSICS.dt
+#     assert not np.allclose(targets[0], displacement[0].reshape(-1), atol=1e-4)
 #
 #
-# def test_the_target_is_the_stored_velocity_times_dt(dataset):
-#     """Where the displacement must come from.
+# def test_the_target_is_the_change_in_the_stored_velocities(dataset):
+#     """The definition, checked against the file it came from.
 #
-#     `step` advances position with the *new* velocity, so the move from tick t to
-#     t+1 is exactly `velocities[t+1] * dt`. Recomputing it any other way is at
-#     best redundant and at worst wrong at the seam.
+#     The window's last input tick is `offset + context - 1`; the change asked
+#     about is the one into the tick after that. Off by one here and every target
+#     describes the wrong tick while remaining a plausible small number.
 #     """
 #     a = arrays(dataset)
 #     _, targets = windows.build_windows(dataset, context=CONTEXT)
@@ -2698,56 +2728,69 @@
 #     for c in range(N_CLIPS):
 #         for offset in (0, 37, per_clip - 1):
 #             last_tick = offset + CONTEXT - 1
-#             expected = a["velocities"][c, last_tick + 1] * PHYSICS.dt
+#             expected = (a["velocities"][c, last_tick + 1]
+#                         - a["velocities"][c, last_tick])
 #             np.testing.assert_allclose(
 #                 targets[c * per_clip + offset].reshape(N_SLOTS, 2),
 #                 expected, rtol=0, atol=1e-6,
 #                 err_msg=f"clip {c}, offset {offset}")
 #
 #
-# def test_the_target_is_torus_correct_across_the_seam(dataset):
-#     """The test that separates a correct loader from a plausible one.
+# def test_the_seam_does_not_reach_the_target(dataset):
+#     """Velocities do not wrap, so the target cannot be corrupted by a crossing.
 #
-#     Subtracting two stored positions gives ~99.8 for a bird that wrapped, rather
-#     than ~0.2 — a target 300x larger than any real one, on roughly 1 tick in 30
-#     at this configuration. It would dominate the loss and teach the model that
-#     birds teleport. The premise assertion below fails if the fixture happens to
-#     contain no crossings, so this cannot pass vacuously.
+#     This is the property that made the velocity change the right quantity to ask
+#     for, quite apart from the leak. A displacement target has to be derived
+#     torus-correctly or a wrapping bird contributes a 99.8-unit move; a velocity
+#     change is immune by construction. The premise assertion below fails if the
+#     fixture contains no crossings, so it cannot pass vacuously.
 #     """
 #     a = arrays(dataset)
 #     positions = a["positions"].astype(np.float64)
 #     jumps = np.abs(np.diff(positions, axis=1))
-#     crossings = int((jumps > PHYSICS.bounds / 2).any(axis=-1).sum())
-#     assert crossings > 0, "premise failed: no bird crossed the seam in this fixture"
+#     wrapped = (jumps > PHYSICS.bounds / 2).any(axis=-1)
+#     assert wrapped.any(), "premise failed: no bird crossed the seam in this fixture"
 #
 #     _, targets = windows.build_windows(dataset, context=CONTEXT)
 #
-#     assert np.abs(targets).max() <= PHYSICS.max_speed * PHYSICS.dt + 1e-5
+#     assert np.abs(targets).max() <= 2 * PHYSICS.max_speed
 #
 #
-# def test_the_target_agrees_with_the_torus_delta_of_the_positions(dataset):
-#     """Two independent derivations of the same displacement must agree.
+# def test_a_copier_cannot_score_well_on_this_target(dataset):
+#     """The reason the target changed, as a regression guard.
 #
-#     `v[t+1] * dt` is what the loader should use; `get_torus` on the two stored
-#     positions is the other route to the same quantity. Agreement means the
-#     stored velocities, the stored positions and the wrap all describe one world.
+#     "The same change as last tick" is the dumbest predictor that could plausibly
+#     win here. On the full dataset it scores R2 +0.924 against this target and
+#     +0.9998 against a displacement target - so if someone quietly switches the
+#     target back, this fails. Both numbers are computed here rather than
+#     hardcoded, and the fixture is smaller than the dataset, so the thresholds
+#     are loose on purpose.
 #     """
 #     a = arrays(dataset)
-#     positions = a["positions"].astype(np.float64)
+#     velocities = a["velocities"].astype(np.float64)
 #     _, targets = windows.build_windows(dataset, context=CONTEXT)
 #
 #     per_clip = windows_per_clip()
-#     for c in range(N_CLIPS):
-#         for offset in (0, 91, per_clip - 1):
-#             last_tick = offset + CONTEXT - 1
-#             for i in range(N_SLOTS):
-#                 expected = get_torus(positions[c, last_tick, i],
-#                                      positions[c, last_tick + 1, i],
-#                                      PHYSICS.bounds)
-#                 np.testing.assert_allclose(
-#                     targets[c * per_clip + offset].reshape(N_SLOTS, 2)[i],
-#                     expected, rtol=0, atol=1e-4,
-#                     err_msg=f"clip {c}, offset {offset}, bird {i}")
+#     ticks = np.arange(CONTEXT - 1, CONTEXT - 1 + per_clip)
+#     previous_change = (velocities[:, ticks] - velocities[:, ticks - 1])
+#     previous_change = previous_change.reshape(len(targets), -1)
+#
+#     def skill(prediction, truth):
+#         return 1 - ((prediction - truth) ** 2).mean() / truth.var()
+#
+#     on_target = skill(previous_change, targets.astype(np.float64))
+#     displacement = (velocities[:, ticks + 1] * PHYSICS.dt).reshape(len(targets), -1)
+#     previous_move = (velocities[:, ticks] * PHYSICS.dt).reshape(len(targets), -1)
+#     on_displacement = skill(previous_move, displacement)
+#
+#     assert on_displacement > 0.99, (
+#         f"premise failed: a copier only scored {on_displacement:.4f} against a "
+#         "displacement target, so this fixture does not demonstrate the leak")
+#     assert 0.5 < on_target < 0.95, (
+#         f"a copier scores {on_target:.4f} against the current target. Above 0.95 "
+#         "is displacement-target territory and leaves nothing for the model to "
+#         "learn; below 0.5 means the target is not a velocity change at all, "
+#         "since repeating the previous change should be a decent guess")
 #
 #
 # # --- what the input is --------------------------------------------------------
@@ -2779,6 +2822,20 @@
 #     assert len(inputs) == windows_per_clip()
 #     np.testing.assert_array_equal(
 #         inputs[0], a["positions"][2, :CONTEXT].reshape(CONTEXT, -1))
+#
+#
+# def test_a_generator_selects_the_same_clips_as_a_list(dataset):
+#     """`clips` is consumed twice — the mask check, then the window loop — so
+#     a one-shot iterator would arrive empty at the second use. The
+#     implementation converts to a list first; this pins that a generator
+#     selects exactly what the equivalent list does."""
+#     from_list, from_list_t = windows.build_windows(
+#         dataset, context=CONTEXT, clips=[0, 2])
+#     from_gen, from_gen_t = windows.build_windows(
+#         dataset, context=CONTEXT, clips=iter([0, 2]))
+#
+#     np.testing.assert_array_equal(from_gen, from_list)
+#     np.testing.assert_array_equal(from_gen_t, from_list_t)
 #
 #
 # def test_two_disjoint_clip_lists_partition_the_whole_dataset(dataset):
@@ -2814,6 +2871,28 @@
 #     would run, produce nothing, and report a fine-looking loss of nan or 0."""
 #     with pytest.raises(ValueError):
 #         windows.build_windows(dataset, context=N_TICKS + 5)
+#
+#
+# @pytest.mark.parametrize("context", [0, -1])
+# def test_a_context_below_one_is_refused(dataset, context):
+#     """A window of zero ticks predicts from nothing.
+#
+#     Today context=0 dies inside numpy's reshape with a message about
+#     (0,newaxis), not at the argument — and a refactor of the flattening below
+#     would turn it silent entirely: offset=0 then reads velocities[c, -1], the
+#     clip's *last* tick, into its *first* target. Refuse at the door, naming it.
+#     """
+#     with pytest.raises(ValueError, match="context"):
+#         windows.build_windows(dataset, context=context)
+#
+#
+# def test_an_empty_clip_selection_is_refused(dataset):
+#     """clips=[] builds zero windows and returns shape-(0,) float64 arrays —
+#     not even the documented shapes. A split that accidentally selects nothing
+#     would then train on air. Same philosophy as the context refusal above:
+#     an empty training set must be an error, never a quiet empty array."""
+#     with pytest.raises(ValueError, match="clip"):
+#         windows.build_windows(dataset, context=CONTEXT, clips=[])
 #
 #
 # # --- determinism ---------------------------------------------------------------

@@ -174,3 +174,21 @@ def test_force_cap_leaves_distant_neighbours_alone():
     )
 
     np.testing.assert_allclose(force, [-0.2, 0.0])
+
+def test_a_coincident_neighbour_is_ignored_not_infinite():
+    """Two birds at exactly the same position are 0 apart, where 1/d is
+    undefined. The `0 < dist` guard skips them, so they contribute nothing —
+    neither an infinity, a NaN, nor the capped magnitude in an arbitrary
+    direction.
+
+    Pinned because it is specified nowhere else and it sits on the label path:
+    admitting coincident birds would change recorded forces without raising,
+    and a divide-by-zero here would poison the clip from that tick onwards.
+    """
+    positions = np.array([[10.0, 10.0],
+                          [10.0, 10.0]])
+
+    force = calculate_separation(0, positions, SEPARATION_RADIUS, BOUNDS)
+
+    assert not np.isnan(force).any(), "NaN would silently poison every label"
+    np.testing.assert_array_equal(force, [0.0, 0.0])

@@ -1,6 +1,6 @@
 # The test suite
 
-133 tests, ~7 seconds. `pytest -q` from the repo root.
+153 tests, ~7 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -14,19 +14,19 @@ one above it holds:
 | folder | file | what it covers | tests |
 |---|---|---|---|
 | `primitives/` | `test_geometry.py` | torus distance, the two-sided speed clamp, `Physics` validation | 21 |
-| `forces/` | `test_separation.py` | `calculate_separation` | 10 |
+| `forces/` | `test_separation.py` | `calculate_separation` | 11 |
 | | `test_alignment.py` | `calculate_alignment` | 6 |
 | | `test_cohesion.py` | `calculate_cohesion` | 11 |
 | `simulator/` | `test_step.py` | one tick: the integrator, the constants, the label invariants | 20 |
 | | `test_rollout.py` | hundreds of ticks: what only shows up over time | 13 |
 | `dataset/` | `test_generate.py` | `polarisation()`, and `generate_clip()`: one clip in memory | 24 |
 | | `test_dataset.py` | `build_dataset()`: many clips, on disk, with provenance | 28 |
+| | `test_windows.py` | `build_windows()`: clips cut into training windows | 19 |
 
-Plus `dataset/test_windows.py`: 15 tests specifying `build_windows()`, the
-function that turns whole clips into fixed-length training windows. It skips as
-one unit until `windows.py` exists, so it is not counted above. It is the
-specification for that function, not a description of one - read its module
-docstring before writing anything that produces training tensors.
+`dataset/test_windows.py` was written before `windows.py` existed and skipped as
+one unit until it did. Its module docstring is the interface contract, including
+seven decisions that were made rather than derived - read it before writing
+anything that produces training tensors.
 
 `forces/` is the one to be most careful with. Those three files test the
 functions whose output becomes the ground-truth label for every probe and every
@@ -116,6 +116,7 @@ Push away from close neighbours, `1/d`, capped.
 | `single_bird_world` | the degenerate case a refactor forgets |
 | `force_cap_limits_magnitude_without_rotating_it` | clamping `dist` instead of the magnitude — `offset/dist` stops being a unit vector, so the "cap of 1.0" yields 0.5 and repulsion *grows* with distance |
 | `force_cap_leaves_distant_neighbours_alone` | a cap quietly rescaling every label in the dataset |
+| `a_coincident_neighbour_is_ignored_not_infinite` | a bird exactly on top of another: `1/d` undefined, so the `0 < dist` guard skips it. Unspecified anywhere else, on the label path |
 
 ## forces/test_alignment.py
 
@@ -257,3 +258,30 @@ propagates it in silence.
 | `no_nan_in_live_slots` | what makes every live-slots-only check in this file safe to rely on |
 | `positions_and_speeds_are_legal_including_tick_0` | tick 0 specifically — the one state the simulator never produced. The upper bound on position is closed rather than half-open, because a coordinate a hair under `bounds` can round *up* to exactly `bounds` in float32 |
 | `settle_tick_matches_a_recomputation_from_the_stored_velocities` | a settling tick that does not describe the file it sits in. Runs on a 300-tick fixture and asserts at least one clip settled — see the note above on why |
+
+## dataset/test_windows.py
+
+`build_windows()` — whole clips cut into fixed-length windows: `context`
+consecutive ticks of raw positions in, the next tick's **change in velocity**
+out. Written before the function existed.
+
+| test | catches |
+|---|---|
+| `the_shapes` | the per-tick flattening being skipped, leaving birds and coordinates on separate axes |
+| `the_arrays_are_float32` | a float64 promotion on the way to the model |
+| `the_window_count_is_exact` | off-by-one in `n_states - context`. Too many and the last window has no target; too few and data is dropped in silence |
+| `no_window_straddles_two_clips` | **sliding a window along a flattened array.** It splices the end of one flock onto the start of another; every value is a legal position, nothing raises, and the model is asked to predict a discontinuity that never happened. Every window is rebuilt from its source clip and compared |
+| `the_target_is_neither_a_position_nor_a_displacement` | **the leak.** Both rejected targets are answerable by copying: a do-nothing predictor scores R² = 1.000000 against the next position, and a copier scores +0.999809 against the displacement. Ruled out here by their own arithmetic — a displacement is never smaller than `min_speed * dt` |
+| `the_target_is_the_change_in_the_stored_velocities` | tick misalignment. Off by one and every target describes the wrong tick while staying a plausible small number |
+| `the_seam_does_not_reach_the_target` | the reason this target was chosen quite apart from the leak: velocities do not wrap, so a bird crossing the seam cannot contribute a 99.8-unit target the way a displacement would. Has a premise assertion, so it cannot pass with a fixture containing no crossings |
+| `a_copier_cannot_score_well_on_this_target` | **someone quietly switching the target back.** "The same change as last tick" scores +0.924 against this target and +0.9998 against a displacement one; the test brackets the score from both sides, so it fails whether the target becomes too easy or stops being a velocity change at all |
+| `the_input_is_raw_unnormalised_positions` | a loader that silently divides by `bounds`, making every later question about units harder and hiding the seam rather than fixing it |
+| `clips_none_uses_every_clip` | the default quietly selecting a subset |
+| `a_subset_selects_only_those_clips` | a selection that is ignored, or applied to the wrong axis |
+| `a_generator_selects_the_same_clips_as_a_list` | `clips` being consumed twice — once by the mask check, once by the window loop — so a one-shot iterator arrives empty at the second use and silently selects nothing |
+| `two_disjoint_clip_lists_partition_the_whole_dataset` | the structural guarantee behind a split by clip. Train and validation are two calls with disjoint clip lists; if together they reproduce the full set exactly, no window is in both and none is lost. A tick-level split violates this, and adjacent windows share 7 of their 8 ticks |
+| `masked_slots_are_refused` | NaN into a model, discovered an hour into a run. The perturbation split has dead slots by design and is the obvious thing to point this at |
+| `a_context_longer_than_the_clip_is_refused` | zero windows returned in silence, and a training loop that runs on nothing |
+| `a_context_below_one_is_refused` | `context=0` and `context=-1`, which used to die inside numpy's reshape with a message about `(0,newaxis)` rather than at the argument. Checks the message names the argument, since an error that does not is one you debug twice |
+| `an_empty_clip_selection_is_refused` | `clips=[]`, which returned shape-`(0,)` float64 arrays and no complaint — a split that accidentally selects nothing, training on air |
+| `two_calls_give_identical_arrays` | non-determinism in the loader itself |
