@@ -1,8 +1,16 @@
 import subprocess
 from pathlib import Path
 
+import argparse
+import time
+
+
+
+
 import numpy as np
 from boids import step
+from boids import Physics
+
 
 import dataclasses
 import json
@@ -166,6 +174,46 @@ def build_dataset(physics, *, n_clips, n_slots, n_live, n_ticks, base_seed, out_
         
 
 
+def main(argv=None):
+    
+    parser = argparse.ArgumentParser(description="Generate a murmuration clip dataset.")
+    parser.add_argument("--clips", type=int, default=200)
+    parser.add_argument("--slots", type=int, default=12)
+    parser.add_argument("--live", type=int, default=None, help="live birds per clip (default: every slot)")
+    parser.add_argument("--ticks", type=int, default=300)
+    parser.add_argument("--seed", type=int, default=0, help="base seed")
+    parser.add_argument("--out", default="data/clips")
+    parser.add_argument("--allow-dirty", action="store_true", help="generate from an uncommitted tree, and record that")
+    args = parser.parse_args(argv)
+
+    if args.live is None:
+        n_live = args.slots
+    else:
+        n_live = args.live
+
+    #time the generation only, not the summary, care about what generating costs, not what the report looks like
+    started = time.perf_counter()
+    out_dir = build_dataset(Physics(), n_clips=args.clips, n_slots=args.slots,
+                                     n_live=n_live, n_ticks=args.ticks,
+                                     base_seed=args.seed, out_dir=args.out,
+                                     allow_dirty=args.allow_dirty)
+    elapsed = time.perf_counter() - started
+
+    config = json.loads((out_dir / "config.json").read_text()) #reading the json with safe damage reports
+    provenance = config["provenance"]
+
+    #a receipt, not a report: what was written, where, and how long it took.
+    #every invariant a report would print is asserted in tests/dataset instead,
+    #where a violation fails the run rather than printing a word nobody reads
+    written = sum(f.stat().st_size for f in out_dir.iterdir())
+    print(f"wrote {args.clips} clips x {args.ticks} ticks x {args.slots} slots to {out_dir}")
+    print(f"{written / 1e6:.1f} MB in {elapsed:.1f}s")
+    print(f"{provenance['tag']} at {provenance['commit'][:7]}, dirty={provenance['dirty']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
 
 
     
