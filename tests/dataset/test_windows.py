@@ -49,6 +49,7 @@ Seven decisions are baked in here. Say so and I will change them:
 import numpy as np
 import pytest
 
+import boids
 from world import PHYSICS_CRUISING
 
 generate = pytest.importorskip("generate")
@@ -85,6 +86,21 @@ def masked(tmp_path_factory):
 def arrays(dataset_dir):
     with np.load(dataset_dir / "clips.npz") as z:
         return {name: z[name] for name in z.files}
+
+
+def repaired(window):
+    """What a window looks like once a seam crossing is followed instead of
+    subtracted: keep the first tick where it is, then add each tick's real move.
+
+    Written here from the contract rather than imported, so that a window is
+    checked against a second expression of the rule and not against itself.
+    """
+    moves = boids.get_torus(window[1:], window[:-1], PHYSICS.bounds)
+    out = np.empty_like(window)
+    out[0] = window[0]
+    for i in range(1, len(window)):
+        out[i] = out[i - 1] + moves[i - 1]
+    return out
 
 
 def windows_per_clip(n_ticks=N_TICKS, context=CONTEXT):
@@ -138,9 +154,10 @@ def test_no_window_straddles_two_clips(dataset):
     per_clip = windows_per_clip()
     for c in range(N_CLIPS):
         for offset in range(per_clip):
-            expected = a["positions"][c, offset:offset + CONTEXT].reshape(CONTEXT, -1)
-            np.testing.assert_array_equal(
-                inputs[c * per_clip + offset], expected,
+            expected = repaired(
+                a["positions"][c, offset:offset + CONTEXT]).reshape(CONTEXT, -1)
+            np.testing.assert_allclose(
+                inputs[c * per_clip + offset], expected, atol=1e-3,
                 err_msg=f"clip {c}, offset {offset}")
 
 
@@ -250,12 +267,140 @@ def test_a_copier_cannot_score_well_on_this_target(dataset):
 
 def test_the_input_is_raw_unnormalised_positions(dataset):
     """A loader that silently divides by bounds makes every later unit question
-    harder, and hides the seam rather than fixing it."""
-    inputs, _ = windows.build_windows(dataset, context=CONTEXT)
+    harder, and hides the seam rather than fixing it.
 
-    assert inputs.min() >= 0.0
-    assert inputs.max() <= PHYSICS.bounds
+    Repaired windows may leave the box, but only by as far as a bird can fly
+    inside one window - so the tolerance is derived, not guessed. Anything
+    beyond it means the repair is accumulating across windows instead of
+    re-anchoring at each one.
+    """
+    inputs, _ = windows.build_windows(dataset, context=CONTEXT)
+    drift = (CONTEXT - 1) * PHYSICS.max_speed * PHYSICS.dt
+
+    assert inputs.min() >= -drift
+    assert inputs.max() <= PHYSICS.bounds + drift
     assert inputs.max() - inputs.min() > PHYSICS.bounds / 2, "looks normalised"
+
+
+# --- trap 3: the seam in the input --------------------------------------------
+
+def test_no_window_contains_a_teleport(dataset):
+    """The property the repair exists for, stated without reference to how.
+
+    Inside a window, a bird may move at most `max_speed * dt` per tick. Raw
+    coordinates break that on any window containing a crossing: 99.995 after
+    0.151 reads as a 99.8-unit move. Measured on the full dataset at context 8,
+    one window in five contains one.
+    """
+    a = arrays(dataset)
+    raw_jumps = np.abs(np.diff(a["positions"].astype(np.float64), axis=1))
+    assert (raw_jumps > PHYSICS.bounds / 2).any(), (
+        "premise failed: no bird crossed the seam in this fixture, so this "
+        "test would pass without any repair happening")
+
+    inputs, _ = windows.build_windows(dataset, context=CONTEXT)
+    per_tick = inputs.reshape(len(inputs), CONTEXT, N_SLOTS, 2)
+    steps = np.abs(np.diff(per_tick.astype(np.float64), axis=1))
+
+    assert steps.max() <= PHYSICS.max_speed * PHYSICS.dt + 1e-3, (
+        f"a window contains a {steps.max():.2f}-unit step; the speed cap allows "
+        f"{PHYSICS.max_speed * PHYSICS.dt}")
+
+
+def test_each_step_in_a_window_is_the_stored_velocity(dataset):
+    """The repair must reproduce the motion, not merely remove the jump.
+
+    Position advances with the new velocity, so p[t] - p[t-1] == v[t] * dt
+    exactly. Subtracting any constant multiple of bounds would also kill the
+    jump while putting the bird in the wrong place; this pins the right one.
+    """
+    a = arrays(dataset)
+    velocities = a["velocities"].astype(np.float64)
+    inputs, _ = windows.build_windows(dataset, context=CONTEXT)
+    per_tick = inputs.reshape(len(inputs), CONTEXT, N_SLOTS, 2).astype(np.float64)
+
+    per_clip = windows_per_clip()
+    for c in range(N_CLIPS):
+        for offset in range(per_clip):
+            window = per_tick[c * per_clip + offset]
+            moved = np.diff(window, axis=0)
+            expected = velocities[c, offset + 1:offset + CONTEXT] * PHYSICS.dt
+            np.testing.assert_allclose(
+                moved, expected, atol=1e-3,
+                err_msg=f"clip {c}, offset {offset}")
+
+
+def test_the_window_is_anchored_at_its_first_stored_tick(dataset):
+    """The first tick is never rewritten.
+
+    This is what stops the repair accumulating: every window restarts from a
+    real stored coordinate, so a flock circling the world forever still yields
+    windows within a few units of the box.
+    """
+    a = arrays(dataset)
+    inputs, _ = windows.build_windows(dataset, context=CONTEXT)
+    per_clip = windows_per_clip()
+
+    for c in range(N_CLIPS):
+        for offset in range(per_clip):
+            np.testing.assert_array_equal(
+                inputs[c * per_clip + offset][0],
+                a["positions"][c, offset].reshape(-1),
+                err_msg=f"clip {c}, offset {offset}")
+
+
+def test_a_window_that_never_crosses_is_the_raw_slice(dataset):
+    """No crossing, no change. The repair must not touch ordinary windows.
+
+    Not bit-exact: rebuilding a position by adding up moves rounds differently
+    from reading it off the array, and at float32 near 100.0 that is worth about
+    2e-06. The tolerance below is fifty thousand times smaller than the
+    correction a real crossing applies, so it still fails loudly if an ordinary
+    window is genuinely altered.
+    """
+    a = arrays(dataset)
+    positions = a["positions"]
+    inputs, _ = windows.build_windows(dataset, context=CONTEXT)
+    per_clip = windows_per_clip()
+
+    untouched = 0
+    for c in range(N_CLIPS):
+        for offset in range(per_clip):
+            slice_ = positions[c, offset:offset + CONTEXT]
+            if (np.abs(np.diff(slice_.astype(np.float64), axis=0))
+                    > PHYSICS.bounds / 2).any():
+                continue
+            np.testing.assert_allclose(
+                inputs[c * per_clip + offset], slice_.reshape(CONTEXT, -1),
+                atol=2e-3, err_msg=f"clip {c}, offset {offset}")
+            untouched += 1
+
+    assert untouched > 0, "premise failed: every window in this fixture crossed"
+
+
+def test_the_fixture_actually_exercises_the_repair(dataset):
+    """Guards every test above from passing because nothing ever needed fixing.
+
+    At least one window must come out different from its raw slice, and by a
+    lot - a crossing moves a coordinate by nearly a whole `bounds`.
+    """
+    a = arrays(dataset)
+    positions = a["positions"]
+    inputs, _ = windows.build_windows(dataset, context=CONTEXT)
+    per_clip = windows_per_clip()
+
+    biggest = 0.0
+    for c in range(N_CLIPS):
+        for offset in range(per_clip):
+            raw = positions[c, offset:offset + CONTEXT].reshape(CONTEXT, -1)
+            difference = np.abs(inputs[c * per_clip + offset].astype(np.float64)
+                                - raw.astype(np.float64)).max()
+            biggest = max(biggest, difference)
+
+    assert biggest > PHYSICS.bounds / 2, (
+        f"the largest correction applied anywhere was {biggest:.3f}; a real "
+        "crossing moves a coordinate by nearly a full bounds, so either the "
+        "fixture contains none or the repair is not happening")
 
 
 # --- clip selection, which is how splits happen -------------------------------
@@ -273,8 +418,9 @@ def test_a_subset_selects_only_those_clips(dataset):
     inputs, _ = windows.build_windows(dataset, context=CONTEXT, clips=[2])
 
     assert len(inputs) == windows_per_clip()
-    np.testing.assert_array_equal(
-        inputs[0], a["positions"][2, :CONTEXT].reshape(CONTEXT, -1))
+    np.testing.assert_allclose(
+        inputs[0], repaired(a["positions"][2, :CONTEXT]).reshape(CONTEXT, -1),
+        atol=1e-3)
 
 
 def test_a_generator_selects_the_same_clips_as_a_list(dataset):

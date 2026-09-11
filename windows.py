@@ -1,5 +1,8 @@
+import json
 import numpy as np
 from pathlib import Path
+
+from boids import get_torus
 
 
 
@@ -9,6 +12,10 @@ def build_windows(dataset_dir, *, context, clips=None):
     if context < 1:
         raise ValueError(f"context must be at least 1, got {context}")
     dataset_dir = Path(dataset_dir)
+    #the world's width, read from the dataset's own record rather than assumed -
+    #a dataset generated with different physics must repair against its own bounds
+    with open(dataset_dir / "config.json") as config_file:
+        bounds = json.load(config_file)["physics"]["bounds"]
     with np.load(dataset_dir / "clips.npz") as clips_data:
         positions = clips_data["positions"]
         velocities = clips_data["velocities"]
@@ -35,6 +42,16 @@ def build_windows(dataset_dir, *, context, clips=None):
     for c in clip_indices:
         for offset in range(n_windows_clip):
             window_in = positions[c, offset : offset + context] #slicing, taking in the offset+context positions
+            #what each tick's move REALLY was. get_torus wraps the subtraction,
+            #so "99.995, 0.151" comes back as -0.156 instead of +99.844
+            real_moves = get_torus(window_in[1:], window_in[:-1], bounds)
+            #how far the bird has travelled from the window's first tick by
+            #each later tick
+            travelled = np.concatenate([np.zeros_like(window_in[:1]),
+                                        np.cumsum(real_moves, axis=0)])
+            #start at the stored first tick and follow those moves, so
+            #a flock circling the world forever never drifts off to infinity
+            window_in = window_in[:1] + travelled
             target_velo = (velocities[c, offset + context] - velocities[c, offset + context -1]).astype(np.float32) #comparing CHANGE in velocities, harder to copy, not good enough though (t+1 - t)
             window_in_flat = window_in.reshape(context, -1)
             target_velo_flat = target_velo.reshape(-1)

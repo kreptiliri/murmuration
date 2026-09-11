@@ -11,6 +11,5 @@ data/
 temp.txt
 a_small_roadmapforme.txt
 .pytest_cache/
-
-# scratch views, not deliverables
+notes_written_offline.txt
 scratch_*
