@@ -24,6 +24,7 @@ def cancel_squash(scaler, values):
     return values * std + mean
 
 
+
 def skill(prediction, truth, baseline):
     model_error = ((prediction - truth) ** 2).sum()
     copier_error = ((baseline - truth) ** 2).sum()
@@ -41,23 +42,6 @@ class Model(torch.nn.Module):
 
 def build_model(*, context, n_features): #callable, everywhere
     return Model(context, n_features)  
-
-import time, train, windows
-
-
-learn, check = train.split_by_clip(200, train_fraction=0.7)
-t = time.time()
-x, y = windows.build_windows('data/clips', context=8, clips=learn)
-print(x.shape, y.shape, x.dtype, y.dtype)
-print(f'{x.nbytes/1e6:.1f} MB, built in {time.time()-t:.1f}s')
-
-input_scaler = train.squasher(x)
-answer_scaler = train.squasher(y)
-x_scaled = train.apply_squash(input_scaler, x)
-y_scaled = train.apply_squash(answer_scaler, y)
-
-print(f"{x_scaled.mean(), x_scaled.std(),y_scaled.mean(),y_scaled.std()}")
-
 
 
 
