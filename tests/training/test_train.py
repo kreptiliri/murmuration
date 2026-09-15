@@ -197,3 +197,134 @@ def test_skill_is_negative_when_worse_than_the_baseline():
     worse = truth + rng.normal(scale=0.5, size=truth.shape)
 
     assert train.skill(worse, truth, baseline) < 0
+
+
+# --- trap 5: the input arrangement ---------------------------------------------
+
+def test_to_moves_keeps_the_shape():
+    """The model is built for `context` ticks. np.diff gives context-1."""
+    rng = np.random.default_rng(6)
+    positions = rng.normal(size=(20, CONTEXT, N_FEATURES))
+
+    assert train.to_moves(positions).shape == positions.shape
+
+
+def test_to_moves_leaves_the_first_tick_alone():
+    """pos(0) is the only thing carrying where the birds are, not just how they move.
+
+    Replacing it with a zero - anchoring each bird to its own start - scores
+    better and flattens every bird onto the origin, destroying the inter-bird
+    geometry all three rules are made of. NOTES.md, 2026-09-15.
+    """
+    rng = np.random.default_rng(7)
+    positions = rng.normal(size=(20, CONTEXT, N_FEATURES))
+
+    np.testing.assert_array_equal(train.to_moves(positions)[:, 0], positions[:, 0])
+
+
+def test_to_moves_throws_nothing_away():
+    """A cumulative sum maps it back. Identical information, identical ceiling."""
+    rng = np.random.default_rng(8)
+    positions = rng.normal(size=(20, CONTEXT, N_FEATURES))
+
+    restored = np.cumsum(train.to_moves(positions), axis=1)
+
+    np.testing.assert_allclose(restored, positions, atol=1e-12)
+
+
+def test_to_moves_puts_the_step_between_ticks_in_row_one():
+    rng = np.random.default_rng(9)
+    positions = rng.normal(size=(20, CONTEXT, N_FEATURES))
+
+    np.testing.assert_allclose(train.to_moves(positions)[:, 1],
+                               positions[:, 1] - positions[:, 0], atol=1e-12)
+
+
+# --- trap 6: the baseline every score is reported against -----------------------
+
+def test_the_copier_is_the_previous_velocity_change():
+    rng = np.random.default_rng(10)
+    positions = rng.normal(size=(20, CONTEXT, N_FEATURES))
+
+    expected = (positions[:, -1] - 2 * positions[:, -2] + positions[:, -3]) / 0.1
+
+    np.testing.assert_allclose(train.copier_baseline(positions, dt=0.1),
+                               expected, atol=1e-12)
+
+
+def test_the_copier_predicts_no_change_at_constant_velocity():
+    """No acceleration in, no acceleration out - the copier is a second difference."""
+    steady = np.arange(CONTEXT)[None, :, None] * np.ones((5, 1, N_FEATURES)) * 0.4
+
+    predicted = train.copier_baseline(steady, dt=0.1)
+
+    np.testing.assert_allclose(predicted, 0.0, atol=1e-12)
+
+
+def test_the_copier_refuses_a_context_it_cannot_read():
+    """Two ticks give one velocity and no change in it. Fail loudly, not quietly."""
+    with pytest.raises(ValueError, match="3 ticks"):
+        train.copier_baseline(np.zeros((5, 2, N_FEATURES)), dt=0.1)
+
+
+# --- trap 7: the run itself -----------------------------------------------------
+
+generate = pytest.importorskip("generate")
+
+
+@pytest.fixture(scope="module")
+def tiny_dataset(tmp_path_factory):
+    """Small enough to train in a second, long enough for a real split."""
+    import sys
+    sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
+    from world import PHYSICS_CRUISING
+
+    out = tmp_path_factory.mktemp("training")
+    generate.build_dataset(PHYSICS_CRUISING, n_clips=6, n_slots=4, n_live=4,
+                           n_ticks=40, base_seed=20260915, out_dir=out,
+                           allow_dirty=True)
+    return out
+
+
+def test_main_runs_end_to_end_and_reports(tiny_dataset, capsys):
+    """One command, one number. The receipt is the only output."""
+    code = train.main(["--data", str(tiny_dataset), "--clips", "6", "--context", "4",
+                       "--passes", "3", "--batch", "64", "--report-every", "0"])
+
+    printed = capsys.readouterr().out
+    assert code == 0
+    assert "skill against the copier" in printed
+    assert "R2 copier" in printed
+
+
+def test_main_is_repeatable_under_a_seed(tiny_dataset, capsys):
+    """A timing number and a score both need the run to be repeatable."""
+    flags = ["--data", str(tiny_dataset), "--clips", "6", "--context", "4",
+             "--passes", "3", "--batch", "64", "--report-every", "0", "--seed", "1"]
+
+    train.main(flags)
+    first = [line for line in capsys.readouterr().out.splitlines() if "R2 model" in line]
+    train.main(flags)
+    second = [line for line in capsys.readouterr().out.splitlines() if "R2 model" in line]
+
+    assert first == second, "same seed, same data, different score"
+
+
+def test_main_never_fits_the_scaler_on_the_held_out_clips(tiny_dataset, monkeypatch):
+    """The leak that no loss curve shows.
+
+    `squasher` must only ever see the training half. Pinned by watching every
+    call: the number of rows it is handed must never match the held-out set.
+    """
+    seen = []
+    real = train.squasher
+    monkeypatch.setattr(train, "squasher", lambda values: seen.append(len(values)) or real(values))
+
+    train.main(["--data", str(tiny_dataset), "--clips", "6", "--context", "4",
+                "--passes", "1", "--batch", "64", "--report-every", "0"])
+
+    n_windows_per_clip = 41 - 4
+    assert seen, "squasher was never called"
+    assert all(rows == 4 * n_windows_per_clip for rows in seen), (
+        f"squasher saw {seen} rows; the training half is "
+        f"{4 * n_windows_per_clip} (4 of 6 clips)")
