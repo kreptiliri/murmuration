@@ -17,7 +17,7 @@ to be honest, and these are the four ways a training script lies:
 Five functions are pinned here. Say so and I will change any of them:
 
     split_by_clip(n_clips, *, train_fraction)   -> (range, range)
-    squasher(values)                          -> tuple
+    squasher(values)                            -> tuple
     apply_squash(scaler, values)                -> array, centred and scaled
     cancel_squash(scaler, values)               -> array, back in real units
     build_model(*, context, n_features, ...)    -> torch.nn.Module
