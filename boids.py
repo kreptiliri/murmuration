@@ -9,7 +9,7 @@ class Physics:
     dt: float = 0.1
     bounds: float = 100.0
     max_speed: float = 5.0
-    min_speed: float = 2.0 
+    min_speed: float = 1.0
     separation_radius: float = 20.0
     alignment_radius: float = 30.0   
     cohesion_radius: float = 40.0
