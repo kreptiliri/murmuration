@@ -142,7 +142,8 @@ def main(argv=None):
     parser.add_argument("--train-fraction", type=float, default=0.7)
     parser.add_argument("--passes", type=int, default=1000)
     parser.add_argument("--batch", type=int, default=256)
-    parser.add_argument("--lr", type=float, default=0.01)
+    #1e-3 is what every transformer score in the project was measured at
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--report-every", type=int, default=50)
     parser.add_argument("--model", choices=["linear", "transformer"], default="linear")
@@ -235,6 +236,12 @@ def main(argv=None):
         if args.report_every and passes % args.report_every == 0:
             run += 1
             print(f"R2 {1 - total / batches_number}, time: {time.time() - start_time}s, run: {run}")
+    if args.checkpoint_every:
+        #the loop checkpoints before each pass, so the trained model is not on
+        #disk anywhere until this line
+        save_checkpoint(checkpoint_dir / f"pass_{args.passes:04d}.pt", model=model,
+                        pass_number=args.passes, config=model_config,
+                        x_scaler=X_mean_std, y_scaler=Y_mean_std)
     elapsed = time.time() - start_time
 
     with torch.no_grad():
