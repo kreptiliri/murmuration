@@ -120,7 +120,20 @@ def copier_baseline(position_windows, *, dt):
     return (position_windows[:, -1] - 2 * position_windows[:, -2]
             + position_windows[:, -3]) / dt
 
+def clamped_copier_baseline(position_windows, *, dt, min_speed, max_speed):
+    curr = (position_windows[:, -1] - position_windows[:, -2]) / dt
+    next_velocity = curr + copier_baseline(position_windows, dt=dt)
+    pos = np.array(position_windows, copy=True)
+    rows = pos.shape[0]
+    n_slots = pos.shape[-1] // 2
 
+    final = next_velocity.reshape(rows, n_slots, 2)
+    length  = np.linalg.norm(final, axis=-1, keepdims=True)
+    wanted  = np.clip(length, min_speed, max_speed)
+    length = np.where(length > 0, length, 1.0)
+    final   = final * (wanted / length)
+    return  (final.reshape(next_velocity.shape) - curr)
+    
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Train on a window of positions.")
     parser.add_argument("--data", default="data/clips")
@@ -136,13 +149,21 @@ def main(argv=None):
     #relabelling the birds is an exact symmetry of the simulator, so a permuted
     #window is an example it could have produced and did not
     parser.add_argument("--augment", action="store_true")
+    #the baseline is a function of the window alone, so subtracting it rewords
+    #the question rather than leaking the answer
+    parser.add_argument("--residual", choices=["none", "copier", "clamped"],
+                        default="none")
     #0 is never, a 1000-pass sweep must not start filling the disk by accident
     parser.add_argument("--checkpoint-every", type=int, default=0)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
     args = parser.parse_args(argv)
 
     with open(Path(args.data) / "config.json") as config_file:
-        dt = json.load(config_file)["physics"]["dt"]
+        physics = json.load(config_file)["physics"]
+    #data/ holds clips at min_speed 2.0 and at 1.0, so a hardcoded floor reads
+    #the wrong one silently
+    dt = physics["dt"]
+    min_speed, max_speed = physics["min_speed"], physics["max_speed"]
 
     learn, check = split_by_clip(args.clips, train_fraction=args.train_fraction)
     x_learn, y_learn = windows.build_windows(args.data, context=args.context, clips=learn)
@@ -151,9 +172,22 @@ def main(argv=None):
     moves_and_first_pos_learn = to_moves(x_learn) #pos(0), travel(x) = pos(x) -pos(x-1), x = {1,7}
     moves_and_first_pos_check = to_moves(x_check)
 
-    X_mean_std, Y_mean_std = squasher(moves_and_first_pos_learn), squasher(y_learn)
+    if args.residual == "copier":
+        baseline_learn = copier_baseline(x_learn, dt=dt)
+        baseline_check = copier_baseline(x_check, dt=dt)
+    elif args.residual == "clamped":
+        baseline_learn = clamped_copier_baseline(x_learn, dt=dt, min_speed=min_speed, max_speed=max_speed)
+        baseline_check = clamped_copier_baseline(x_check, dt=dt, min_speed=min_speed, max_speed=max_speed)
+    else:
+        baseline_learn, baseline_check = np.zeros_like(y_learn), np.zeros_like(y_check)
 
-    X_check, Y_check = apply_squash(X_mean_std, moves_and_first_pos_check), apply_squash(Y_mean_std, y_check)
+    #what the model is asked to learn, and so what the scaler has to describe -
+    #residuals are far smaller than the targets they came from
+    residual_learn, residual_check = y_learn - baseline_learn, y_check - baseline_check
+
+    X_mean_std, Y_mean_std = squasher(moves_and_first_pos_learn), squasher(residual_learn)
+
+    X_check, Y_check = apply_squash(X_mean_std, moves_and_first_pos_check), apply_squash(Y_mean_std, residual_check)
 
     X_tensor_check, Y_tensor_check = torch.from_numpy(X_check).float(), torch.from_numpy(Y_check).float()
     torch.manual_seed(args.seed)
@@ -176,14 +210,14 @@ def main(argv=None):
             save_checkpoint(checkpoint_dir / f"pass_{passes:04d}.pt", model=model, pass_number=passes, config=model_config, x_scaler=X_mean_std, y_scaler=Y_mean_std )
         total = 0
         batches_number = 0
-        indices = torch.randperm(len(x_learn)).numpy() #0,1,.,41019
+        indices = torch.randperm(len(x_learn)).numpy() #0,1,.,41019   
 
         for start in range(0, len(x_learn), args.batch):
             #raw windows, so the permutation happens before to_moves and before
             #the scaler - permuting scaled data mixes columns that were divided
             #by different numbers, and nothing raises
             rows = indices[start:start+args.batch]
-            raw_batch, true_velo_batches = x_learn[rows], y_learn[rows]
+            raw_batch, true_velo_batches = x_learn[rows], residual_learn[rows]
             if args.augment:
                 raw_batch, true_velo_batches = permute_slots(raw_batch, true_velo_batches, shuffler)
             pos_batches = torch.from_numpy(
@@ -210,7 +244,8 @@ def main(argv=None):
             predict_check = model(check_batches)
             predicts.append(predict_check)
         stacked = torch.cat(predicts) #stack to one array
-        pred_real = cancel_squash(Y_mean_std, stacked.numpy())
+        #the model only ever predicted the leftover, so the baseline goes back on
+        pred_real = cancel_squash(Y_mean_std, stacked.numpy()) + baseline_check
         #true_real = train.cancel_squash(Y_mean_std, Y_check) just y_check
         r2 = 1 - ((pred_real - y_check)**2).sum() / ((y_check.mean(axis=0) - y_check)**2).sum()
 
