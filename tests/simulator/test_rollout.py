@@ -1,13 +1,3 @@
-"""The simulator run forwards, rather than one tick at a time.
-
-Every other file in this suite checks a single call. These check what happens
-over hundreds of them, which is the regime the dataset is actually generated
-in and where a different class of bug lives: a NaN that appears on tick 300
-and spreads, a position that drifts outside the world, an integrator that
-quietly pumps energy into the flock until every bird is pinned at the speed
-cap. None of those can be caught by looking at one tick.
-"""
-
 from dataclasses import replace
 
 import numpy as np
@@ -282,10 +272,11 @@ def test_speed_stays_between_the_floor_and_the_cap_on_every_tick():
             f"bird above the cap at tick {tick}: {speeds.max()}")
         floor_engaged += int(np.isclose(speeds.min(), physics.min_speed))
 
-    # Measured at this density: the floor holds at least one bird on about
-    # 30% of ticks. At 60 birds it is every tick; at 20 the flock is sparse
-    # enough that many birds drift above it on their own.
-    assert floor_engaged > 50, (
+    # The guard exists so this test cannot go quietly vacuous if the floor
+    # stops engaging at all. Measured at N_BIRDS, seed 11, 500 ticks: 24 of 500
+    # ticks at min_speed 1.0, against roughly 150 of 500 when the floor was 2.0.
+    # Lowering the floor is what moved it, and 24 still exercises the branch.
+    assert floor_engaged > 10, (
         f"premise failed: the floor only engaged on {floor_engaged} of 500 "
         "ticks, so this mostly tested a flock that never needed it"
     )
