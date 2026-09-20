@@ -93,7 +93,7 @@ class Block(torch.nn.Module):
         self.feedforward = FeedForward(d_model=d_model)
 
     def forward(self, x):
-        #x + ... is the residual: the block starts as identity and tweaks from there
+        #x + ... is the residual; the block starts as identity and tweaks from there
         #norms go BEFORE, not after
         x = x + self.attention(self.norm_one(x))
         x = x + self.feedforward(self.norm_two(x))
@@ -105,8 +105,7 @@ class Transformer(torch.nn.Module):
         super().__init__()
         self.embedding = InputEmbedding(n_features=n_features, d_model=d_model,
                                         max_context=max_context)
-        #a plain list hides the blocks from
-        #parameters() and the optimiser never touches them, so modulelist
+        #a plain list hides the blocks from parameters() and the optimiser never touches them, so modulelist
         self.blocks = torch.nn.ModuleList()
         for _ in range(n_blocks):
             self.blocks.append(Block(d_model=d_model, n_heads=n_heads))

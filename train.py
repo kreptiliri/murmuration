@@ -6,9 +6,10 @@ from pathlib import Path
 import numpy as np
 import torch
 
+import flocker
 import windows
 
-def split_by_clip(n_clips, *, train_fraction):    
+def split_by_clip(n_clips, *, train_fraction):
     n_train = int(n_clips * train_fraction)
     return range(n_train), range(n_train, n_clips)
 
@@ -47,10 +48,34 @@ class Model(torch.nn.Module):
         x = self.layer(x)
         return x
 
-def build_model(*, context, n_features): #callable, everywhere
-    return Model(context, n_features)  
+def build_model(*, context, n_features, kind="linear",
+                d_model=128, n_heads=4, n_blocks=2): #callable, everywhere
+    if kind == "linear":
+        return Model(context, n_features)
+    if kind == "transformer":
+        return flocker.Transformer(n_features=n_features, d_model=d_model,
+                                   n_heads=n_heads, n_blocks=n_blocks,
+                                   max_context=context)
+    #a typo must not quietly train the wrong model for an hour
+    raise ValueError(f"unknown model kind {kind!r}, expected 'linear' or 'transformer'")
 
 
+
+def save_checkpoint(path, *, model, pass_number, config, x_scaler, y_scaler, score=None):
+    torch.save({"state_dict": model.state_dict(), "pass_number": pass_number, "config": config, "x_scaler": x_scaler, "y_scaler": y_scaler, "score": score}, path)
+    #pass is look through trsining pile
+
+def load_checkpoint(path):
+    checkpoint_data = torch.load(path, weights_only=False)
+    checkpoint_model = build_model(**checkpoint_data["config"])
+    checkpoint_model.load_state_dict(checkpoint_data["state_dict"]) #loading fresh model with weights, theyre under state_dict
+    checkpoint_model.eval()
+    return {"model": checkpoint_model,
+            "pass_number": checkpoint_data["pass_number"],
+            "config": checkpoint_data["config"],
+            "x_scaler": checkpoint_data["x_scaler"],
+            "y_scaler": checkpoint_data["y_scaler"],
+            "score": checkpoint_data["score"]}
 
 
 
@@ -63,6 +88,28 @@ def build_model(*, context, n_features): #callable, everywhere
 def to_moves(position_windows):
     #pos(0), then the move between each pair of ticks
     return np.concatenate([position_windows[:, :1, :], np.diff(position_windows, axis=1)], axis=1)
+
+def permute_slots(position_windows, targets, rng):
+    #shuffling bird nametags, while keeping (x,y) real
+    if rng is None:
+        rng = np.random.default_rng()
+    #fresh copies
+    pw_out = np.array(position_windows, copy=True)
+    tg_out = np.array(targets, copy=True)
+    n_rows = pw_out.shape[0]
+    #no 12 hardcode
+    n_slots = pw_out.shape[-1] // 2
+    #shuffling the range(12) array
+    perms = np.argsort(rng.random((n_rows, n_slots)), axis=1)
+    #vertical to pin each colomn to it's data
+    row_idx = np.arange(n_rows)[:, None]
+    #(N, 8, 24) -> (N, 8 ,12, (x,y))
+    pw_reshaped = pw_out.reshape(pw_out.shape[0], pw_out.shape[1], n_slots, 2)
+    #numpy annoying broadcast:
+    tg_reshaped = tg_out.reshape(n_rows, n_slots, 2)
+    pw_shuffled = np.take_along_axis(pw_reshaped, perms[:, None, :, None], axis=2)
+    tg_shuffled = tg_reshaped[row_idx, perms]
+    return pw_shuffled.reshape(pw_out.shape), tg_shuffled.reshape(tg_out.shape)
 
 
 def copier_baseline(position_windows, *, dt):
@@ -85,6 +132,13 @@ def main(argv=None):
     parser.add_argument("--lr", type=float, default=0.01)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--report-every", type=int, default=50)
+    parser.add_argument("--model", choices=["linear", "transformer"], default="linear")
+    #relabelling the birds is an exact symmetry of the simulator, so a permuted
+    #window is an example it could have produced and did not
+    parser.add_argument("--augment", action="store_true")
+    #0 is never, a 1000-pass sweep must not start filling the disk by accident
+    parser.add_argument("--checkpoint-every", type=int, default=0)
+    parser.add_argument("--checkpoint-dir", default="checkpoints")
     args = parser.parse_args(argv)
 
     with open(Path(args.data) / "config.json") as config_file:
@@ -98,28 +152,44 @@ def main(argv=None):
     moves_and_first_pos_check = to_moves(x_check)
 
     X_mean_std, Y_mean_std = squasher(moves_and_first_pos_learn), squasher(y_learn)
-    X_scaled, Y_scaled = apply_squash(X_mean_std, moves_and_first_pos_learn), apply_squash(Y_mean_std, y_learn)
 
     X_check, Y_check = apply_squash(X_mean_std, moves_and_first_pos_check), apply_squash(Y_mean_std, y_check)
 
-    X_tensor_learn, Y_tensor_learn = torch.from_numpy(X_scaled).float(), torch.from_numpy(Y_scaled).float()
     X_tensor_check, Y_tensor_check = torch.from_numpy(X_check).float(), torch.from_numpy(Y_check).float()
     torch.manual_seed(args.seed)
-    model = build_model(context=args.context, n_features=x_learn.shape[2])
+    model_config = {"kind":args.model, "context": args.context, "n_features": x_learn.shape[2], "d_model": 128, "n_heads": 4, "n_blocks": 2}
+    model = build_model(**model_config)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     loss_function = torch.nn.MSELoss()
+    #its own stream, so the batch order below stays exactly what torch.randperm
+    #always gave and every score already recorded still reproduces
+    shuffler = np.random.default_rng(args.seed)
     run = 0
     start_time = time.time()
-    for passes in range(args.passes):
+    if args.checkpoint_every:
+        checkpoint_dir = Path(args.checkpoint_dir)
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+    
+    for passes in range(args.passes): #selection pass 0 as untrained for the model, plot starting from (0.0)
+        if args.checkpoint_every and passes % args.checkpoint_every == 0: #falsy guard
+            save_checkpoint(checkpoint_dir / f"pass_{passes:04d}.pt", model=model, pass_number=passes, config=model_config, x_scaler=X_mean_std, y_scaler=Y_mean_std )
         total = 0
         batches_number = 0
-        indices = torch.randperm(len(X_tensor_learn)) #0,1,.,41019
-        #X_shuffled = 41020 row in random order
-        X_shuffled, Y_shuffled = X_tensor_learn[indices], Y_tensor_learn[indices]
+        indices = torch.randperm(len(x_learn)).numpy() #0,1,.,41019
 
-        for start in range(0, len(X_tensor_learn), args.batch):
-            pos_batches = X_shuffled[start:start+args.batch]
-            true_velo_batches = Y_shuffled[start:start+args.batch]
+        for start in range(0, len(x_learn), args.batch):
+            #raw windows, so the permutation happens before to_moves and before
+            #the scaler - permuting scaled data mixes columns that were divided
+            #by different numbers, and nothing raises
+            rows = indices[start:start+args.batch]
+            raw_batch, true_velo_batches = x_learn[rows], y_learn[rows]
+            if args.augment:
+                raw_batch, true_velo_batches = permute_slots(raw_batch, true_velo_batches, shuffler)
+            pos_batches = torch.from_numpy(
+                apply_squash(X_mean_std, to_moves(raw_batch))).float()
+            true_velo_batches = torch.from_numpy(
+                apply_squash(Y_mean_std, true_velo_batches)).float()
             prediction = model(pos_batches)
             loss = loss_function(prediction, true_velo_batches) #computes average wrongness across batch to one number, to pass down to backwards(only accept 1 number)
             optimizer.zero_grad()
