@@ -1,6 +1,3 @@
-"""The primitives every rule is built on: torus distance, the speed cap,
-and the Physics config object's own validation."""
-
 from dataclasses import FrozenInstanceError, asdict
 
 import numpy as np
@@ -136,11 +133,15 @@ def test_physics_rejects_nonsense_scales():
 def test_floor_raises_a_slow_velocity_without_turning_it():
     """The mirror of the cap: rescale the magnitude, keep the heading.
 
-    Speed 1.0 against a floor of 2.0 must double the vector, not rotate it.
+    A velocity at half the floor must be doubled, not rotated. Derived from
+    `MIN_SPEED` rather than written as a literal, so that changing the floor in
+    `boids.py` cannot leave this test asserting something that is no longer
+    the case.
     """
-    out = velocity_capper(np.array([0.6, 0.8]), MAX_SPEED, MIN_SPEED)
+    heading = np.array([0.6, 0.8])           # a unit vector, chosen to be exact
+    out = velocity_capper(heading * MIN_SPEED / 2, MAX_SPEED, MIN_SPEED)
 
-    np.testing.assert_allclose(out, [1.2, 1.6])
+    np.testing.assert_allclose(out, heading * MIN_SPEED)
     assert np.linalg.norm(out) == pytest.approx(MIN_SPEED)
 
 
