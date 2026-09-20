@@ -1,49 +1,48 @@
-"""The contract for `train.py` — written before it exists.
-
-Step 4 is a throwaway run whose only products are a wall-clock number and a
-first score next to the copier. The code does not need to be good. It does need
-to be honest, and these are the four ways a training script lies:
-
-1. **It leaks.** A clip in both train and test makes any score meaningless.
-2. **It reports in the wrong units.** The target gets scaled to train on, and if
-   the scaling is not undone the number printed is not comparable to anything.
-3. **It is wired wrong and trains anyway.** A transposed axis or a mis-sliced
-   tick produces a loss that falls smoothly while the model learns nothing
-   useful. Nothing raises.
-4. **It is graded against nothing.** A score with no baseline beside it cannot
-   be read - see `NOTES.md`, where a do-nothing predictor scored a perfect
-   result against the original target.
-
-Five functions are pinned here. Say so and I will change any of them:
-
-    split_by_clip(n_clips, *, train_fraction)   -> (range, range)
-    squasher(values)                            -> tuple
-    apply_squash(scaler, values)                -> array, centred and scaled
-    cancel_squash(scaler, values)               -> array, back in real units
-    build_model(*, context, n_features, ...)    -> torch.nn.Module
-    skill(prediction, truth, baseline)          -> float
-
-`build_model` returns a module mapping `(batch, context, n_features)` to
-`(batch, n_features)` - a whole window in, one tick of prediction out.
-
-`skill` is the honest score: 0 means the prediction is no better than the
-baseline handed to it, 1 means perfect, negative means worse than the baseline.
-It is deliberately *not* R², because R² against the mean flatters everything on
-this target.
-"""
-
 import numpy as np
 import pytest
 
 torch = pytest.importorskip("torch")
 train = pytest.importorskip(
     "train",
-    reason="train.py does not exist yet — this suite is its specification")
+    reason="train.py does not exist yet, this suite is its specification")
 
 
 CONTEXT = 8
 N_SLOTS = 12
 N_FEATURES = N_SLOTS * 2
+
+
+@pytest.fixture(scope="module")
+def tiny_dataset(tmp_path_factory):
+    """Small enough to train in a second, long enough for a real split."""
+    import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from world import PHYSICS_CRUISING
+
+    generate = pytest.importorskip("generate")
+    out = tmp_path_factory.mktemp("train_defaults")
+    generate.build_dataset(PHYSICS_CRUISING, n_clips=6, n_slots=4, n_live=4,
+                           n_ticks=40, base_seed=20260920, out_dir=out,
+                           allow_dirty=True)
+    return out
+
+
+def test_the_default_learning_rate_is_the_one_every_score_was_measured_at(
+        tiny_dataset, monkeypatch):
+    """0.01 was chosen for the one-layer Linear. Every transformer number in the
+    project was measured at 1e-3, so a run that forgets the flag has to be the
+    run that was measured, not a different one that still completes."""
+    seen = []
+    real = torch.optim.Adam
+    monkeypatch.setattr(torch.optim, "Adam",
+                        lambda params, **kw: seen.append(kw.get("lr")) or real(params, **kw))
+
+    train.main(["--data", str(tiny_dataset), "--clips", "6", "--context", "4",
+                "--passes", "1", "--batch", "64", "--report-every", "0"])
+
+    assert seen == [pytest.approx(1e-3)], (
+        f"the optimiser was built with lr={seen}, not 1e-3")
 
 
 # --- trap 1: the split ---------------------------------------------------------
