@@ -1,12 +1,3 @@
-"""step(): the integrator, and the reconstruction invariant.
-
-The invariant is the load-bearing test in this project. Every probe and every
-ablation is trained against the numbers in the forces dict, so if those numbers
-cannot reproduce the velocity update the simulator actually performed, they are
-not labels for this simulation and every downstream result is fitted to
-something that never happened.
-"""
-
 from dataclasses import replace
 
 import numpy as np

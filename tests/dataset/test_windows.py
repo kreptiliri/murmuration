@@ -1,51 +1,3 @@
-"""The contract for `build_windows()` — written before it exists.
-
-`clips.npz` holds whole clips. A transformer eats fixed-length windows. This is
-the function in between, and it is where the project's two known traps live:
-the leaky target, and the torus seam.
-
-    build_windows(dataset_dir, *, context, clips=None) -> (inputs, targets)
-
-    inputs   (n_windows, context, n_slots * 2)  float32  raw positions
-    targets  (n_windows, n_slots * 2)           float32  velocity change, next tick
-
-One window is `context` consecutive ticks from a single clip; its target is how
-much each bird's velocity changes on the tick after the window ends -
-`velocities[t+1] - velocities[t]`.
-
-Seven decisions are baked in here. Say so and I will change them:
-
-1. **Positions only in the input.** `SPEC.md` §5: "One tick = N birds × 2
-   values". Velocity is recoverable from consecutive ticks, so feeding it too
-   would hand the model a quantity it could derive — and quietly change what a
-   probe for "does it represent velocity" is even asking.
-2. **The target is the change in velocity, not the next position and not the
-   displacement.** Both of those are answerable by copying. A do-nothing
-   predictor scores R² = 1.000000 against the next position; a predictor that
-   repeats the previous move scores **+0.999809** against the displacement,
-   leaving 0.019% of the variance for anything a model might actually learn.
-   Against the velocity change the same copier scores **+0.924143** - still a
-   lot, which is why `NOTES.md` also requires reporting skill against
-   persistence rather than against the mean, but four hundred times more room.
-   Measured over 200 clips, 300 ticks, N=12, context 8.
-3. **The target comes from the stored velocities, never from positions.**
-   `velocities[t+1] - velocities[t]`. Velocities do not wrap, so unlike a
-   displacement target this one has no seam in it at all. Note the target is
-   *not* the force: the speed floor fires on 31% of bird-ticks, so it is
-   force-then-clamped, and `corr(dv, force*dt) = 0.765`.
-4. **Raw coordinates, not normalised.** Scaling is the model's business, and a
-   loader that silently divides by 100 makes every later "what units is this
-   probe in" question harder than it needs to be.
-5. **numpy out, not torch.** Keeps this testable without importing torch, and
-   leaves dtype and device to the training script where they belong.
-6. **Clip selection by argument, not a returned index.** `clips=range(0, 180)`
-   and `clips=range(180, 200)` is a split by clip. Getting a tick-level split
-   out of this API takes deliberate effort, which is the point — adjacent ticks
-   are nearly identical and a tick split leaks the test set into training.
-7. **Each tick flattened to `n_slots * 2` numbers**, one token per tick, as §5
-   describes. Per-bird structure is not preserved here.
-"""
-
 import numpy as np
 import pytest
 
@@ -55,7 +7,7 @@ from world import PHYSICS_CRUISING
 generate = pytest.importorskip("generate")
 windows = pytest.importorskip(
     "windows",
-    reason="windows.py does not exist yet — this suite is its specification")
+    reason="windows.py does not exist yet, this suite is its specification")
 
 PHYSICS = PHYSICS_CRUISING
 N_CLIPS = 4
@@ -143,7 +95,7 @@ def test_no_window_straddles_two_clips(dataset):
     """Reconstructed from the source array, window by window.
 
     A flat view of the positions array would let a window begin near the end of
-    one clip and run into the start of the next — splicing together two
+    one clip and run into the start of the next, splicing together two
     unrelated flocks. Every value in that window is a legal position, nothing
     raises, and the model is asked to predict a discontinuity that never
     happened.
@@ -167,7 +119,9 @@ def test_the_target_is_neither_a_position_nor_a_displacement(dataset):
     """Both of the rejected targets, ruled out by their own arithmetic.
 
     A position target lands in [0, 100). A displacement target has every entry
-    between min_speed*dt and max_speed*dt, so its magnitude is never below 0.2.
+    between min_speed*dt and max_speed*dt, so its magnitude is never below one
+    tick of travel at the floor - the assertion below derives that bound rather
+    than naming it, because the floor is a config choice and has moved once.
     A velocity change is bounded by 2*max_speed and routinely near zero - a
     settled bird barely changes velocity at all.
     """
@@ -424,7 +378,7 @@ def test_a_subset_selects_only_those_clips(dataset):
 
 
 def test_a_generator_selects_the_same_clips_as_a_list(dataset):
-    """`clips` is consumed twice — the mask check, then the window loop — so
+    """`clips` is consumed twice, the mask check, then the window loop, so
     a one-shot iterator would arrive empty at the second use. The
     implementation converts to a list first; this pins that a generator
     selects exactly what the equivalent list does."""
@@ -477,7 +431,7 @@ def test_a_context_below_one_is_refused(dataset, context):
     """A window of zero ticks predicts from nothing.
 
     Today context=0 dies inside numpy's reshape with a message about
-    (0,newaxis), not at the argument — and a refactor of the flattening below
+    (0,newaxis), not at the argument, and a refactor of the flattening below
     would turn it silent entirely: offset=0 then reads velocities[c, -1], the
     clip's *last* tick, into its *first* target. Refuse at the door, naming it.
     """
@@ -486,7 +440,7 @@ def test_a_context_below_one_is_refused(dataset, context):
 
 
 def test_an_empty_clip_selection_is_refused(dataset):
-    """clips=[] builds zero windows and returns shape-(0,) float64 arrays —
+    """clips=[] builds zero windows and returns shape-(0,) float64 arrays, 
     not even the documented shapes. A split that accidentally selects nothing
     would then train on air. Same philosophy as the context refusal above:
     an empty training set must be an error, never a quiet empty array."""

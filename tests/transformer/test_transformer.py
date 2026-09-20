@@ -1,31 +1,9 @@
-"""The contract for the whole model.
-
-    Transformer(*, n_features, d_model, n_heads, n_blocks, max_context)
-    forward(x)  (batch, context, n_features) -> (batch, n_features)
-
-Same signature in and out as the one-layer `Linear` it replaces, which is the
-point: `build_model` in train.py swaps one for the other and nothing else in
-the training loop moves.
-
-`test_it_can_memorise_eight_windows` is the wiring check and the only test here
-that trains. A correctly wired model overfits a handful of examples into the
-floor. If it cannot, an axis is transposed or the head is reading the wrong
-position, and no amount of real training fixes that - it converges to something
-plausible and wrong instead. Run it before any long run, not after.
-
-One decision is baked in: **the head reads the last tick only.** Positions 0-6
-are computed and discarded. With a causal mask every position could instead
-predict its own next tick, giving `context` training signals per window rather
-than one - free data, and the nanoGPT arrangement. It needs build_windows to
-emit a target per tick, which it does not, so that stays a later change.
-"""
-
 import pytest
 
 torch = pytest.importorskip("torch")
 flocker = pytest.importorskip(
     "flocker",
-    reason="flocker.py does not exist yet — this suite is its specification")
+    reason="flocker.py does not exist yet, this suite is its specification")
 
 N_FEATURES = 24
 CONTEXT = 8

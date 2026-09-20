@@ -1,27 +1,3 @@
-"""Every tracked module must import from an empty directory, silently.
-
-Written after `train.py` shipped with exploration code at module level: an
-`import` that read `data/clips` and printed four lines. `data/` is gitignored,
-so on any clone `import train` raised `FileNotFoundError` - and nothing in the
-suite noticed, because the suite runs where the data happens to exist.
-
-The same failure class has now appeared twice. The first time a tracked module
-imported an untracked one; this time a tracked module read an untracked
-directory. Both are invisible on the machine that wrote them and fatal on every
-other machine, which is the definition of a bug a test has to catch.
-
-Two properties, both checked by importing in a subprocess whose working
-directory is empty:
-
-1. **It must succeed.** Anything an import reaches for - a data directory, a
-   config file, a sibling module that is not in the repo - fails here.
-2. **It must be silent.** A module that prints on import is a module doing work
-   on import. The output is the symptom; the work is the defect.
-
-Import time is measured too, and kept well under a second. A module that loads
-a dataset quietly would pass the two checks above and still be wrong.
-"""
-
 import subprocess
 import sys
 import time

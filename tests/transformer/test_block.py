@@ -1,29 +1,9 @@
-"""The contract for one transformer block.
-
-    Block(*, d_model, n_heads)
-    forward(x)  (batch, context, d_model) -> same shape
-
-Norm, attention, add the input back. Norm, feed-forward, add the input back.
-Nothing else.
-
-The load-bearing test is `test_the_residual_is_real`. A block written as
-`x = attention(norm(x))` rather than `x = x + attention(norm(x))` runs, trains,
-and quietly loses the property that lets transformers be stacked at all: with
-the residual, a block starts life as the identity function and tweaks from
-there, so adding a third and fourth block cannot make things worse. Without
-it, each block has to relearn everything its input already knew.
-
-The causality test is here as well as in test_attention.py on purpose. The
-mask is correct inside `CausalSelfAttention`; this checks that wrapping it in
-norms and residuals did not route the future back in around it.
-"""
-
 import pytest
 
 torch = pytest.importorskip("torch")
 flocker = pytest.importorskip(
     "flocker",
-    reason="flocker.py does not exist yet — this suite is its specification")
+    reason="flocker.py does not exist yet, this suite is its specification")
 
 D_MODEL = 32
 N_HEADS = 4

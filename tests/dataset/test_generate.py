@@ -1,40 +1,3 @@
-"""The contract for `generate_clip()` — written before it exists.
-
-This file is the specification. `generate.py` does not exist yet, so the whole
-module skips; the moment it does, these become real and most of them will be
-red. Build into them.
-
-    generate_clip(physics, *, n_slots, n_live, n_ticks, seed) -> dict
-
-Returns one clip's arrays in memory. No file I/O, no config, no summary — those
-are the writer's job and get their own tests.
-
-    positions    (n_ticks + 1, n_slots, 2)  float64   state at ticks 0..n_ticks
-    velocities   (n_ticks + 1, n_slots, 2)  float64
-    separation   (n_ticks,     n_slots, 2)  float64   force on state[t] -> [t+1]
-    alignment    (n_ticks,     n_slots, 2)  float64
-    cohesion     (n_ticks,     n_slots, 2)  float64
-    mask         (n_ticks + 1, n_slots)     bool      slot holds a live entity
-    kind         (n_slots,)                 int8      0 = bird
-    settle_tick  int                        smallest index into `velocities`
-                                            with polarisation > 0.99, else -1
-
-Four decisions are baked in here. Say so and I will change them:
-
-1. **A flat dict**, keyed exactly as the plan's storage layout names the arrays,
-   so the same word means the same thing in memory, on disk and in the summary.
-2. **float64 in memory.** The plan stores float32; that cast belongs to the
-   writer, in one place. Keeping the clip lossless means the tick-alignment test
-   below can assert *exact* equality rather than a tolerance, which is a much
-   stronger claim.
-3. **Keyword-only sizing arguments.** `n_slots`, `n_live` and `n_ticks` are three
-   ints in a row. Passed positionally, swapping any two runs perfectly and yields
-   a wrong dataset — the same failure that put eleven positional floats into
-   `step` and cost a refactor to undo.
-4. **`kind` has no tick axis.** Nothing in `SPEC.md` changes an entity's type
-   mid-clip; `mask` carries the tick axis because §6.2 drops a bird mid-flight.
-"""
-
 import numpy as np
 import pytest
 
@@ -44,9 +7,9 @@ from world import PHYSICS_CRUISING
 
 generate = pytest.importorskip(
     "generate",
-    reason="generate.py does not exist yet — this suite is its specification")
+    reason="generate.py does not exist yet, this suite is its specification")
 
-PHYSICS = PHYSICS_CRUISING      # the shipped config, min_speed = 2.0
+PHYSICS = PHYSICS_CRUISING      # the shipped config, floor on
 N_SLOTS = 12
 N_TICKS = 20                    # short on purpose: contract tests, not rollouts
 
@@ -184,7 +147,7 @@ def test_forces_produce_the_next_velocity_exactly():
 
     `forces[t]` must be what acted on `velocities[t]` to give `velocities[t+1]`.
     Record them one iteration apart and every label in the dataset describes the
-    wrong state — and the result still looks entirely plausible, because the
+    wrong state, and the result still looks entirely plausible, because the
     physics is self-consistent, just shifted.
 
     Exact rather than approximate: same operations, same order, same float64
@@ -245,7 +208,7 @@ def test_initial_velocities_are_legal():
 
     `tests/world.py:random_flock` draws velocity components uniform in
     ±max_speed, which puts 33.2% of its birds outside `[min_speed, max_speed]`
-    (200 seeds × 12 birds). That is deliberate there — it exercises the clamp.
+    (200 seeds × 12 birds). That is deliberate there, it exercises the clamp.
     Here it would write a first row the simulator can never reach.
 
     Draw a heading uniform in [0, 2π) and a speed uniform in the clamp instead.
@@ -303,7 +266,7 @@ def test_every_slot_is_live_when_n_live_equals_n_slots():
 def test_dead_slots_are_nan_and_exactly_complement_the_mask():
     """NaN in dead slots is a checksum on the mask, not decoration.
 
-    With zeros you cannot tell a dead slot from a bird at the origin, and 0.0
+    With zeros a dead slot is indistinguishable from a bird at the origin, and 0.0
     and -1.0 are both legal velocities. With NaN the two encodings must agree
     exactly, and disagreeing is a test failure rather than a silent one.
     """
@@ -321,7 +284,7 @@ def test_masked_slots_exert_no_force_on_live_birds():
     """The quietest way to produce a plausible dataset of the wrong physics.
 
     `step` uses `N = len(positions)`, so a dead slot handed to it is simply a
-    bird — it pushes on its neighbours and enters their averages, and nothing
+    bird, it pushes on its neighbours and enters their averages, and nothing
     raises. Simulate an (n_live, 2) array and scatter into slots afterwards.
 
     This also pins the initialiser's draw *size*: the two clips below only match

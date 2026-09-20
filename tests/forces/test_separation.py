@@ -1,5 +1,3 @@
-"""calculate_separation: push away from close neighbours, 1/d, capped."""
-
 import numpy as np
 import pytest
 
@@ -177,7 +175,7 @@ def test_force_cap_leaves_distant_neighbours_alone():
 
 def test_a_coincident_neighbour_is_ignored_not_infinite():
     """Two birds at exactly the same position are 0 apart, where 1/d is
-    undefined. The `0 < dist` guard skips them, so they contribute nothing —
+    undefined. The `0 < dist` guard skips them, so they contribute nothing, 
     neither an infinity, a NaN, nor the capped magnitude in an arbitrary
     direction.
 

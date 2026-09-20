@@ -1,34 +1,9 @@
-"""The contract for the input stage — written before it exists.
-
-    InputEmbedding(*, n_features, d_model, max_context)
-    forward(x)  (batch, context, n_features) -> (batch, context, d_model)
-
-Two jobs, and they are separate. Widen each tick from `n_features` numbers to
-`d_model` numbers, and stamp each tick with where it sits in the window.
-
-The second is not optional. Attention has no idea what order anything arrived
-in - shuffle the ticks and every output comes back the same, shuffled with
-them. Without a position stamp, "the flock turned, then straightened" and "the
-flock straightened, then turned" are the same input.
-
-Two decisions are baked in. Say so and I will change them:
-
-1. **A learned position table**, one row per position, added on top - not the
-   sinusoidal encoding of the 2017 paper. `max_context` fixes how many rows
-   exist, which is why a window longer than that has to fail loudly rather
-   than silently reuse row 0.
-2. **Nothing mixes here.** Tick 3's output depends on tick 3 and its position,
-   full stop. Mixing across ticks is attention's job, and doing any of it here
-   would make the probes in SPEC §6 ambiguous about where information first
-   became available.
-"""
-
 import pytest
 
 torch = pytest.importorskip("torch")
 flocker = pytest.importorskip(
     "flocker",
-    reason="flocker.py does not exist yet — this suite is its specification")
+    reason="flocker.py does not exist yet, this suite is its specification")
 
 N_FEATURES = 24
 D_MODEL = 32
@@ -61,7 +36,7 @@ def test_a_shorter_window_is_fine(embedding):
 
 
 def test_a_window_longer_than_the_table_fails_loudly(embedding):
-    """There is no row for position 9. Say so, do not wrap around to row 0."""
+    """There is no row for position 9. It must raise, not wrap to row 0."""
     too_long = torch.randn(BATCH, CONTEXT + 1, N_FEATURES)
 
     with pytest.raises((ValueError, IndexError, RuntimeError)):

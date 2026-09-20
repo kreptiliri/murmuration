@@ -1,40 +1,9 @@
-"""The contract for the feed-forward — written before it exists.
-
-    FeedForward(*, d_model)
-    forward(x)  (batch, context, d_model) -> (batch, context, d_model)
-
-Attention moves information between ticks. This moves nothing - it computes,
-one tick at a time, with no looking sideways.
-
-The load-bearing test is `test_it_is_actually_nonlinear`. Two Linears with
-nothing between them collapse into one Linear: multiply the matrices together
-and the whole model is affine. And the score an affine model reaches on this
-data is known exactly - R2 0.9373, measured 2026-09-15, and the bar is 0.935.
-So a transformer whose feed-forward is accidentally linear would train, look
-healthy, and be incapable of the only result the project is after.
-
-That matters here more than in a language model. Separation, alignment and
-cohesion all turn on how far apart two birds are, and a distance is a square
-root of a sum of squares. No linear layer computes one at any width. The bend
-in the middle of this block is where "near" can first be represented.
-
-Two decisions are baked in. Say so and I will change them:
-
-1. **Hidden width 4x d_model**, the transformer convention since 2017, and
-   what §5's parameter budget assumes. Pinned indirectly: test_block.py's
-   reference check builds PyTorch's layer with dim_feedforward=4*d_model and
-   copies these weights across, so a different multiple fails on shape.
-2. **GELU rather than ReLU.** ReLU is flat below zero, so a unit that goes
-   negative stops receiving gradient entirely; GELU keeps a small slope there.
-   At this depth either trains, and the tests below pass with both.
-"""
-
 import pytest
 
 torch = pytest.importorskip("torch")
 flocker = pytest.importorskip(
     "flocker",
-    reason="flocker.py does not exist yet — this suite is its specification")
+    reason="flocker.py does not exist yet, this suite is its specification")
 
 D_MODEL = 32
 CONTEXT = 8

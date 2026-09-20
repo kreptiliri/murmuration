@@ -1,10 +1,3 @@
-"""The world every test in this suite runs in.
-
-Every constant here derives from boids.py's Physics() rather than being
-restated, so the test suite and the simulator cannot disagree about the size of
-the world or how fast a bird may fly. There is one declaration, in boids.py.
-"""
-
 from dataclasses import replace
 
 import numpy as np

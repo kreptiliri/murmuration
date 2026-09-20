@@ -1,17 +1,3 @@
-"""calculate_cohesion: steer toward the local centre of mass.
-
-Two things make this the most dangerous of the three rules to get wrong.
-
-The centre of mass of a set of positions is meaningless on a torus - the mean
-of x=1 and x=99 is 50, the far side of the world - so the rule must average
-*offsets*, and several tests here exist only to prove that it does.
-
-And the force is a spring: magnitude proportional to displacement from the
-centre, rather than the 1/d law of separation or the flat average of
-alignment. Normalising it to a unit vector would be the natural thing to write
-and would silently destroy the label, so that is pinned too.
-"""
-
 import warnings
 
 import numpy as np
@@ -47,7 +33,7 @@ def test_cohesion_averages_offsets_not_positions():
     2 units to its right and 1 unit to its left. The true mean offset is
     [0.5, 0], a gentle pull in +x.
 
-    Average the raw positions instead and you get (2 + 99) / 2 = 50.5, i.e. a
+    Averaging the raw positions instead gives (2 + 99) / 2 = 50.5, i.e. a
     centre of mass on the far side of the world, and a force of about
     [-1.24, 0]: the opposite direction, a hundred times too strong, and
     entirely plausible-looking.

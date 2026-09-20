@@ -1,45 +1,9 @@
-"""The contract for causal self-attention — written before it exists.
-
-    CausalSelfAttention(*, d_model, n_heads)
-    forward(x)  (batch, context, d_model) -> (batch, context, d_model)
-
-This is the one component in the project that cannot be checked by reading it.
-A transposed reshape mixes the heads together, an off-by-one mask lets a tick
-see one tick into its own future, and a missing scale factor flattens the
-attention weights - all three train perfectly happily and produce a model that
-is quietly wrong. SPEC.md §5: "A transformer that trains but is subtly wrong
-will cost more weeks than writing it did."
-
-So the load-bearing test here is not shape. It is `test_it_matches_pytorchs_own
-_attention`, which is SPEC.md §5's "verify against a reference on a fixed input
-before any training run", made automatic.
-
-Three decisions are baked in. Say so and I will change them:
-
-1. **Three named projections**, `self.q`, `self.k` and `self.v`, each
-   `Linear(d_model, d_model, bias=False)`. nanoGPT fuses them into one layer to
-   save two matmuls; at 400k parameters on CPU that saving is nothing, and the
-   probes in SPEC §6 will want to read queries and keys separately. The
-   reference test has to reconstruct q, k and v to compare against PyTorch, so
-   it must know how they are produced; that is the cost of having the check.
-2. **An output projection `proj`**, `Linear(d_model, d_model, bias=False)`,
-   applied after the heads are rejoined. Without it the heads never mix and
-   multi-head attention is several independent small attentions.
-3. **No dropout** - and this one is under review. It was decided on the linear
-   model's train-to-held-out gap of 0.012 (2026-09-15), which does not carry:
-   the transformer's gap on the same 140 clips is 0.73, train +0.92 against
-   held out -0.00. If regularisation turns out to be the answer rather than
-   more data, `test_two_calls_agree` and the two repeatability tests are what
-   will have to change, and they should be changed deliberately rather than
-   deleted when they start failing.
-"""
-
 import pytest
 
 torch = pytest.importorskip("torch")
 flocker = pytest.importorskip(
     "flocker",
-    reason="flocker.py does not exist yet — this suite is its specification")
+    reason="flocker.py does not exist yet, this suite is its specification")
 
 D_MODEL = 32
 N_HEADS = 4

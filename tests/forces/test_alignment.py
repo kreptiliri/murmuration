@@ -1,5 +1,3 @@
-"""calculate_alignment: match the mean heading of nearby neighbours."""
-
 import numpy as np
 
 from boids import calculate_alignment
@@ -26,8 +24,8 @@ def test_alignment_steers_toward_the_neighbour_mean():
 def test_alignment_switches_off_when_the_flock_already_matches():
     """The trap this rule exists around.
 
-    Returning the raw neighbour mean instead of the difference from your own
-    velocity gives an already-aligned flock a permanent force of [3,0] - it
+    Returning the raw neighbour mean instead of the difference from the bird's
+    own velocity gives an already-aligned flock a permanent force of [3,0] - it
     would accelerate forever into the speed cap and never settle. A matched
     flock must feel nothing.
     """
