@@ -256,13 +256,14 @@ def main(argv=None):
         #true_real = train.cancel_squash(Y_mean_std, Y_check) just y_check
         r2 = 1 - ((pred_real - y_check)**2).sum() / ((y_check.mean(axis=0) - y_check)**2).sum()
 
-    copier = copier_baseline(x_check, dt=dt)
-    average = np.full_like(y_check, y_check.mean(axis=0))
-
     print(f"{len(x_learn)} windows, {args.passes} passes, seed {args.seed}, {elapsed}s")
     print(f"R2 model {r2}")
-    print(f"R2 copier {skill(copier, y_check, average)}")
-    print(f"skill against the copier {skill(pred_real, y_check, copier)}")
+    if args.context >= 3:  
+        copier = copier_baseline(x_check, dt=dt)
+        average = np.full_like(y_check, y_check.mean(axis=0))
+        print(f"R2 copier {skill(copier, y_check, average)}")
+        print(f"skill against the copier {skill(pred_real, y_check, copier)}")
+
     return 0
 
 
