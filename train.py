@@ -23,6 +23,17 @@ def squasher(values):
     std[std == 0] = 1.0
     return mean, std
 
+def shared_squasher(values):
+    values = np.asarray(values)
+    n_birds = values.shape[-1] // 2
+    birds = values.reshape(*values.shape[:-1], n_birds, 2)
+    mean = birds.mean(axis=(0, -2))
+    mean = np.tile(mean, n_birds)
+    std = birds.std(axis=(0, -2))
+    std = np.tile(std, n_birds)
+    std[std == 0] = 1.0
+    return mean, std
+    
 def apply_squash(scaler, values):
     mean, std = scaler
     return (values - mean) / std
@@ -189,8 +200,9 @@ def main(argv=None):
     #what the model is asked to learn, and so what the scaler has to describe -
     #residuals are far smaller than the targets they came from
     residual_learn, residual_check = y_learn - baseline_learn, y_check - baseline_check
-
-    X_mean_std, Y_mean_std = squasher(moves_and_first_pos_learn), squasher(residual_learn)
+    
+    squash = shared_squasher if args.model == "per_bird" else squasher
+    X_mean_std, Y_mean_std = squash(moves_and_first_pos_learn), squash(residual_learn)
 
     X_check, Y_check = apply_squash(X_mean_std, moves_and_first_pos_check), apply_squash(Y_mean_std, residual_check)
 
