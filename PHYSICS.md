@@ -2,7 +2,7 @@
 
 **`boids.py` is authoritative.** This file is generated from `Physics()` and is
 a convenience for reading, never a place to change a value — editing it changes
-nothing and would recreate the exact divergence commit `79d9a03` removed.
+nothing and would recreate the exact divergence commit `dd85096` removed.
 
 Regenerate with:
 
@@ -11,7 +11,7 @@ python -c "from dataclasses import fields; from boids import Physics; p=Physics(
 [print(f.name, getattr(p, f.name)) for f in fields(p)]"
 ```
 
-Generated at commit `79d9a03`.
+Generated at commit `fe9d295`.
 
 ## The constants
 
@@ -21,7 +21,6 @@ Generated at commit `79d9a03`.
 | `bounds` | 100.0 | the world is a bounds x bounds torus |
 | `max_speed` | 5.0 | speed ceiling; velocities above it are rescaled down |
 | `min_speed` | 1.0 | speed floor / cruise speed; velocities below it are rescaled up |
-
 | `separation_radius` | 20.0 | neighbours closer than this push a bird away |
 | `alignment_radius` | 30.0 | neighbours closer than this contribute a heading |
 | `cohesion_radius` | 40.0 | neighbours closer than this pull a bird toward their centre |

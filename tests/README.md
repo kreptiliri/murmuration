@@ -1,6 +1,6 @@
 # The test suite
 
-334 tests, ~15 seconds. `pytest -q` from the repo root.
+372 tests, ~15 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -28,11 +28,15 @@ holds:
 | | `test_feedforward.py` | `FeedForward`, and that it is genuinely nonlinear | 6 |
 | | `test_block.py` | one block: pre-norms and residual connections, against PyTorch's own | 6 |
 | | `test_transformer.py` | the whole model: shapes, determinism, parameter count | 8 |
-| `training/` | `test_train.py` | `split_by_clip`, the scaler pair, `build_model`, `skill` | 23 |
+| | `test_per_bird_transformer.py` | `PerBirdTransformer`: one token per bird, every bird hears every other, relabelling the birds relabels the answers | 10 |
+| `training/` | `test_train.py` | `split_by_clip`, the scaler pair, `build_model`, `skill` | 24 |
 | | `test_model_choice.py` | `--model` and `--augment` reaching the training loop | 16 |
 | | `test_permute_slots.py` | `permute_slots()`: relabelling the birds as augmentation | 14 |
-| | `test_checkpoints.py` | `save_checkpoint` / `load_checkpoint`, `--checkpoint-every`, `--checkpoint-dir` | 15 |
+| | `test_checkpoints.py` | `save_checkpoint` / `load_checkpoint`, `--checkpoint-every`, `--checkpoint-dir` | 16 |
 | | `test_residual.py` | `clamped_copier_baseline()` and `--residual` | 21 |
+| | `test_short_context.py` | a context-2 run finishing, with no copier to report | 3 |
+| | `test_per_bird_choice.py` | `--model per_bird` reaching the training loop and its checkpoints | 4 |
+| | `test_shared_squasher.py` | `shared_squasher()`: one scaler for every bird, used by `--model per_bird` only | 19 |
 | `tests/` | `test_imports_are_clean.py` | nothing tracked imports an untracked file, so a clone runs | 16 |
 
 `forces/` is the one to be most careful with. Those three files test the
@@ -53,7 +57,10 @@ caught a real bug in real code, and those are marked.
 **The `dataset/`, `training/` and `transformer/` files were written before the
 code they test**, as its specification. That is evidence of a different kind,
 since the interface could not be bent to fit whatever got written, but it is not
-the same as watching each test fail for the right reason. Two were checked
+the same as watching each test fail for the right reason. Five have since been
+run against deliberately broken implementations, and every break turned them
+red: `test_permute_slots.py`, `test_model_choice.py`, `test_residual.py`,
+`test_per_bird_transformer.py` and `test_shared_squasher.py`. Two were checked
 harder, both times because something was wrong. `settle_tick_matches_a_recomputation`
 was vacuous, since at the fixture's clip length nothing reached
 polarisation 0.99 and a hardcoded `-1` passed; and the polarisation definition
