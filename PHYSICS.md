@@ -41,13 +41,14 @@ constant-speed flocking model, and is also legal.
 
 ## What these values imply
 
-Measured under exactly the constants above, with the parameters of each
-measurement stated — no figure here is from a single seed.
+The first three rows follow from the constants above. The rest were measured on
+2026-09-01, when `min_speed` was still 2.0, with the parameters of each
+measurement stated. No figure here is from a single seed.
 
 | quantity | value | measured over |
 |---|---|---|
-| distance covered per tick at cruise | 0.2 | `min_speed * dt` |
-| ticks to cross the separation radius | 100 | `separation_radius / (min_speed * dt)` |
+| distance covered per tick at cruise | 0.1 | `min_speed * dt` |
+| ticks to cross the separation radius | 200 | `separation_radius / (min_speed * dt)` |
 | largest possible torus separation | 70.7 | `(bounds/2) * sqrt(2)` |
 | flock orders itself (polarisation > 0.99) | median tick 130, p90 213 | N=12, 40 seeds, 800 ticks |
 | the same at higher density | median tick 94, p90 140 | N=30, 40 seeds, 800 ticks |
