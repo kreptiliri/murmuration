@@ -20,8 +20,8 @@ Generated at commit `79d9a03`.
 | `dt` | 0.1 | seconds per tick, fixed |
 | `bounds` | 100.0 | the world is a bounds x bounds torus |
 | `max_speed` | 5.0 | speed ceiling; velocities above it are rescaled down |
-| `min_speed` | 2.0 | speed floor / cruise speed; velocities below it are rescaled up |
-#staled
+| `min_speed` | 1.0 | speed floor / cruise speed; velocities below it are rescaled up |
+
 | `separation_radius` | 20.0 | neighbours closer than this push a bird away |
 | `alignment_radius` | 30.0 | neighbours closer than this contribute a heading |
 | `cohesion_radius` | 40.0 | neighbours closer than this pull a bird toward their centre |
@@ -56,5 +56,4 @@ measurement stated — no figure here is from a single seed.
 | speed exactly zero | only when a bird has no neighbour in any radius *and* started at rest; never at N >= 10 | 60,000 bird-ticks across densities and both start conditions |
 
 Alignment and cohesion see nearly the whole flock at N=8-12. That is deliberate,
-accepted on the evidence that the three labels stay distinct anyway. See
-`NOTES.md`.
+accepted on the evidence that the three labels stay distinct anyway. 
