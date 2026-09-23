@@ -21,6 +21,7 @@ Generated at commit `79d9a03`.
 | `bounds` | 100.0 | the world is a bounds x bounds torus |
 | `max_speed` | 5.0 | speed ceiling; velocities above it are rescaled down |
 | `min_speed` | 2.0 | speed floor / cruise speed; velocities below it are rescaled up |
+#staled
 | `separation_radius` | 20.0 | neighbours closer than this push a bird away |
 | `alignment_radius` | 30.0 | neighbours closer than this contribute a heading |
 | `cohesion_radius` | 40.0 | neighbours closer than this pull a bird toward their centre |
