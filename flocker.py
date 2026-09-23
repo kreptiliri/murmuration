@@ -20,10 +20,11 @@ class InputEmbedding(torch.nn.Module):
         return x
 
 class CausalSelfAttention(torch.nn.Module):
-    def __init__(self, *, d_model, n_heads):
+    def __init__(self, *, d_model, n_heads, causal=True):
         super().__init__()
         if d_model % n_heads != 0:
             raise ValueError("n_head must divide d_model !!")
+        self.causal = causal
         self.n_heads = n_heads
         self.d_head = d_model // n_heads #head dim with 32 and 4 heads, 4 heads of 8 each
         self.q = torch.nn.Linear(d_model, d_model, bias=False)
@@ -61,8 +62,9 @@ class CausalSelfAttention(torch.nn.Module):
         #t0 sees itself only[1.0,0,0,0], t3 sees everything
         #choosing -inf because softmax has e^(-inf) = 0
         #but e^0 is a *heavy* weight
-        mask = torch.tril(torch.ones(T, T)) #upper right traingle
-        scores = scores.masked_fill(mask ==  0, float("-inf"))
+        if self.causal:
+            mask = torch.tril(torch.ones(T, T)) #upper right traingle
+            scores = scores.masked_fill(mask ==  0, float("-inf"))
         weights = scores.softmax(dim=-1) #making every row sum up to 1
         out = weights @ v #value embeddings * embedding full line
         #v_x dot... + v_y dot ...
@@ -85,10 +87,10 @@ class FeedForward(torch.nn.Module):
 
 
 class Block(torch.nn.Module):
-    def __init__(self, *, d_model, n_heads):
+    def __init__(self, *, d_model, n_heads, causal=True):
         super().__init__()
         self.norm_one = torch.nn.LayerNorm(d_model)
-        self.attention = CausalSelfAttention(d_model=d_model, n_heads=n_heads)
+        self.attention = CausalSelfAttention(d_model=d_model, n_heads=n_heads, causal=causal)
         self.norm_two = torch.nn.LayerNorm(d_model)
         self.feedforward = FeedForward(d_model=d_model)
 
@@ -119,3 +121,25 @@ class Transformer(torch.nn.Module):
         x = self.norm(x)
         #only the last tick is read. the earlier ones are computed and dropped
         return self.head(x[:, -1])
+
+class PerBirdTransformer(torch.nn.Module):
+    def __init__(self, *, n_features, d_model, n_heads, n_blocks, context):
+        super().__init__()
+        self.embedding = torch.nn.Linear(2 * context, d_model)
+        self.blocks = torch.nn.ModuleList()
+        for _ in range(n_blocks):
+            self.blocks.append(Block(d_model=d_model, n_heads=n_heads, causal=False))
+        self.norm = torch.nn.LayerNorm(d_model)
+        self.head = torch.nn.Linear(d_model, 2)
+
+    def forward(self, x):
+        batch, T, n_features = x.shape
+        n_birds = n_features // 2
+        tokens = x.view(batch, T, n_birds, 2).permute(0, 2, 1, 3)
+        tokens = tokens.reshape(batch, n_birds, 2 * T)
+        emb = self.embedding(tokens)
+        for block in self.blocks:
+            emb = block(emb)
+        ans = self.head(self.norm(emb)) #each bird's answer
+        return ans.reshape(batch, n_features)
+

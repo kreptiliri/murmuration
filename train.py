@@ -56,8 +56,12 @@ def build_model(*, context, n_features, kind="linear",
         return flocker.Transformer(n_features=n_features, d_model=d_model,
                                    n_heads=n_heads, n_blocks=n_blocks,
                                    max_context=context)
+    if kind == "per_bird":
+        return flocker.PerBirdTransformer(n_features=n_features, d_model=d_model,
+                                          n_heads=n_heads, n_blocks=n_blocks,
+                                          context=context)
     #a typo must not quietly train the wrong model for an hour
-    raise ValueError(f"unknown model kind {kind!r}, expected 'linear' or 'transformer'")
+    raise ValueError(f"unknown model kind {kind!r}, expected 'linear' or 'transformer' or 'per_bird'")
 
 
 
@@ -146,7 +150,7 @@ def main(argv=None):
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--report-every", type=int, default=50)
-    parser.add_argument("--model", choices=["linear", "transformer"], default="linear")
+    parser.add_argument("--model", choices=["linear", "transformer", "per_bird"], default="linear")
     #relabelling the birds is an exact symmetry of the simulator, so a permuted
     #window is an example it could have produced and did not
     parser.add_argument("--augment", action="store_true")
