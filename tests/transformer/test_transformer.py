@@ -49,15 +49,15 @@ def test_the_blocks_actually_stack(transformer):
            sum(p.numel() for p in one.parameters())
 
 
-def test_the_spec_configuration_is_the_size_the_spec_says():
-    """SPEC §5: d_model 128-256, 4 heads, ~10^5-10^6 parameters."""
+def test_the_default_configuration_is_within_the_design_budget():
+    """The design budget: d_model 128-256, 4 heads, ~10^5-10^6 parameters."""
     torch.manual_seed(0)
     model = flocker.Transformer(n_features=N_FEATURES, d_model=128, n_heads=4,
                                 n_blocks=2, max_context=CONTEXT)
 
     total = sum(p.numel() for p in model.parameters())
 
-    assert 1e5 <= total <= 1e6, f"{total:,} parameters, outside SPEC §5's range"
+    assert 1e5 <= total <= 1e6, f"{total:,} parameters, outside the design budget"
 
 
 def test_it_can_memorise_eight_windows():

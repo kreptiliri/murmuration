@@ -83,7 +83,7 @@ def test_the_x_and_y_of_a_bird_stay_together(batch):
 def test_every_bird_to_bird_distance_is_preserved(batch):
     """The property the whole project rests on.
 
-    `NOTES.md` 2026-09-15: per-bird anchoring scored 3x better and collapsed the
+    Measured 2026-09-15: per-bird anchoring scored 3x better and collapsed the
     bird-0-to-bird-1 spread from 26.89 to 0.00, deleting the raw material of all
     three rules while the loss improved. A permutation must not do that: the
     multiset of pairwise distances is exactly what has to survive.

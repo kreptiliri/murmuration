@@ -67,7 +67,7 @@ def test_two_calls_agree(block, x):
 
 
 def test_the_whole_block_matches_pytorchs_own(block, x):
-    """SPEC §5's reference check, extended from attention to the whole block.
+    """The reference check, extended from attention to the whole block.
 
     test_attention.py verifies the attention maths against PyTorch. This
     verifies everything wrapped around it: that the norms are applied BEFORE

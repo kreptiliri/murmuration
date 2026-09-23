@@ -154,12 +154,12 @@ def test_the_blocks_actually_stack(model):
            sum(p.numel() for p in one.parameters())
 
 
-def test_the_run_configuration_is_the_size_the_spec_says():
-    """SPEC §5: ~10^5-10^6 parameters, at the settings train.py builds with."""
+def test_the_run_configuration_is_within_the_design_budget():
+    """The design budget: ~10^5-10^6 parameters, at the settings train.py builds with."""
     torch.manual_seed(0)
     model = flocker.PerBirdTransformer(n_features=N_FEATURES, d_model=128,
                                        n_heads=4, n_blocks=2, context=CONTEXT)
 
     total = sum(p.numel() for p in model.parameters())
 
-    assert 1e5 <= total <= 1e6, f"{total:,} parameters, outside SPEC §5's range"
+    assert 1e5 <= total <= 1e6, f"{total:,} parameters, outside the design budget"

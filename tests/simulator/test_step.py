@@ -108,8 +108,8 @@ def test_step_reads_the_separation_weight():
     """`w_sep` must scale the recorded force, and proportionally.
 
     Deleting `* w_sep` from `step` passed all twenty of the tests above. The
-    weights are not decoration - NOTES.md makes unequal weights the mechanism
-    that spreads the three rules' acquisition times apart, so a silently
+    weights are not decoration - unequal weights are the lever that spreads
+    the three rules' acquisition times apart, so a silently
     ignored weight does not crash anything, it just deletes the experiment's
     independent variable.
 

@@ -64,7 +64,7 @@ def test_the_same_numbers_at_two_positions_come_out_different(embedding):
 def test_nothing_mixes_across_ticks(embedding, x):
     """Tick 3 must not be able to see tick 5. That is attention's job, later.
 
-    Mixing here would leave SPEC §6's probes unable to say at which layer a
+    Mixing here would leave the probes unable to say at which layer a
     concept first became available, because it would already be everywhere.
     """
     before = embedding(x)

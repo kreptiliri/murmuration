@@ -29,7 +29,7 @@ def test_a_window_comes_back_the_same_shape(attention, x):
 
 
 def test_it_matches_pytorchs_own_attention(attention, x):
-    """SPEC §5's reference check, run on every commit instead of once by hand.
+    """The reference check, run on every commit instead of once by hand.
 
     Rebuilds the same computation out of `torch.nn.functional`, using this
     module's own weights, and demands agreement. Catches a wrong scale factor,

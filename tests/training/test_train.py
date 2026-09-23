@@ -70,7 +70,7 @@ def test_the_train_fraction_is_respected():
 # --- trap 2: the units ---------------------------------------------------------
 
 def test_scaling_is_invertible():
-    """A score printed in scaled units is not comparable to anything in NOTES."""
+    """A score printed in scaled units is not comparable to any recorded score."""
     values = np.random.default_rng(0).normal(3.0, 7.0, size=(500, N_FEATURES))
     scaler = train.squasher(values)
 
@@ -213,7 +213,7 @@ def test_to_moves_leaves_the_first_tick_alone():
 
     Replacing it with a zero - anchoring each bird to its own start - scores
     better and flattens every bird onto the origin, destroying the inter-bird
-    geometry all three rules are made of. NOTES.md, 2026-09-15.
+    geometry all three rules are made of. Measured 2026-09-15.
     """
     rng = np.random.default_rng(7)
     positions = rng.normal(size=(20, CONTEXT, N_FEATURES))

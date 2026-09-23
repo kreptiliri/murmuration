@@ -163,8 +163,8 @@ def spy_on_permute(monkeypatch):
 
 
 def test_augment_off_never_calls_it(tiny_dataset, monkeypatch):
-    """Every number in NOTES.md was measured without this. If it runs when the
-    flag is off, none of them reproduce and nothing says so."""
+    """Every score recorded before the flag existed was measured without this.
+    If it runs when the flag is off, none of them reproduce and nothing says so."""
     seen = spy_on_permute(monkeypatch)
 
     train.main(flags(tiny_dataset))
