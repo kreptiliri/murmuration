@@ -59,3 +59,32 @@ def build_windows(dataset_dir, *, context, clips=None):
             targets.append(target_velo_flat)
 
     return np.array(inputs), np.array(targets)
+
+
+def settled_mask(dataset_dir, *, context, clips=None):
+    #one flag per window
+    if context < 1:
+        raise ValueError(f"context must be at least 1, got {context}")
+    with np.load(Path(dataset_dir) / "clips.npz") as clips_data:
+        settle_tick = clips_data["settle_tick"]
+        n_states = clips_data["positions"].shape[1]
+
+    if clips is None:
+        clip_indices = range(len(settle_tick))
+    elif isinstance(clips, int):
+        clip_indices = [clips]
+    else:
+        clip_indices = list(clips)
+    n_windows_clip = n_states - context
+    if n_windows_clip <= 0:
+        raise ValueError("context is too large for the dataset state length")
+
+    #last input tick per window
+    last_input = np.arange(n_windows_clip) + context - 1
+    flags = []
+    for c in clip_indices:
+        #-1 means never settled
+        settled_here = (settle_tick[c] >= 0) & (last_input >= settle_tick[c])
+        flags.append(settled_here)
+
+    return np.concatenate(flags)
