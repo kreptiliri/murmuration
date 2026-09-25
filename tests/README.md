@@ -1,6 +1,6 @@
 # The test suite
 
-372 tests, ~15 seconds. `pytest -q` from the repo root.
+395 tests, ~17 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -23,6 +23,7 @@ holds:
 | `dataset/` | `test_generate.py` | `polarisation()`, and `generate_clip()`: one clip in memory | 24 |
 | | `test_dataset.py` | `build_dataset()`: many clips, on disk, with provenance | 28 |
 | | `test_windows.py` | `build_windows()`: clips cut into training windows | 24 |
+| | `test_settled_mask.py` | `settled_mask()`: which windows start after the flock has settled | 14 |
 | `transformer/` | `test_input.py` | `InputEmbedding`: each tick widened, and stamped with its position | 6 |
 | | `test_attention.py` | `CausalSelfAttention`, checked against PyTorch's own on a fixed input | 8 |
 | | `test_feedforward.py` | `FeedForward`, and that it is genuinely nonlinear | 6 |
@@ -37,6 +38,7 @@ holds:
 | | `test_short_context.py` | a context-2 run finishing, with no copier to report | 3 |
 | | `test_per_bird_choice.py` | `--model per_bird` reaching the training loop and its checkpoints | 4 |
 | | `test_shared_squasher.py` | `shared_squasher()`: one scaler for every bird, used by `--model per_bird` only | 19 |
+| | `test_settled_only.py` | `--settled-only`: training and scoring on settled windows only | 9 |
 | `tests/` | `test_imports_are_clean.py` | nothing tracked imports an untracked file, so a clone runs | 16 |
 
 `forces/` is the one to be most careful with. Those three files test the
@@ -57,10 +59,11 @@ caught a real bug in real code, and those are marked.
 **The `dataset/`, `training/` and `transformer/` files were written before the
 code they test**, as its specification. That is evidence of a different kind,
 since the interface could not be bent to fit whatever got written, but it is not
-the same as watching each test fail for the right reason. Five have since been
+the same as watching each test fail for the right reason. Seven have since been
 run against deliberately broken implementations, and every break turned them
 red: `test_permute_slots.py`, `test_model_choice.py`, `test_residual.py`,
-`test_per_bird_transformer.py` and `test_shared_squasher.py`. Two were checked
+`test_per_bird_transformer.py`, `test_shared_squasher.py`, `test_settled_mask.py`
+and `test_settled_only.py`. Two were checked
 harder, both times because something was wrong. `settle_tick_matches_a_recomputation`
 was vacuous, since at the fixture's clip length nothing reached
 polarisation 0.99 and a hardcoded `-1` passed; and the polarisation definition
