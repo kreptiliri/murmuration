@@ -165,6 +165,8 @@ def main(argv=None):
     #relabelling the birds is an exact symmetry of the simulator, so a permuted
     #window is an example it could have produced and did not
     parser.add_argument("--augment", action="store_true")
+    #only windows after settling
+    parser.add_argument("--settled-only", action="store_true")
     #the baseline is a function of the window alone, so subtracting it rewords
     #the question rather than leaking the answer
     parser.add_argument("--residual", choices=["none", "copier", "clamped"],
@@ -184,6 +186,16 @@ def main(argv=None):
     learn, check = split_by_clip(args.clips, train_fraction=args.train_fraction)
     x_learn, y_learn = windows.build_windows(args.data, context=args.context, clips=learn)
     x_check, y_check = windows.build_windows(args.data, context=args.context, clips=check)
+    #filter before fitting scalers
+    if args.settled_only:
+        keep_learn = windows.settled_mask(args.data, context=args.context, clips=learn)
+        keep_check = windows.settled_mask(args.data, context=args.context, clips=check)
+        if not keep_learn.any():
+            raise ValueError("no settled windows in the learn clips")
+        if not keep_check.any():
+            raise ValueError("no settled windows in the held-out clips")
+        x_learn, y_learn = x_learn[keep_learn], y_learn[keep_learn]
+        x_check, y_check = x_check[keep_check], y_check[keep_check]
 
     moves_and_first_pos_learn = to_moves(x_learn) #pos(0), travel(x) = pos(x) -pos(x-1), x = {1,7}
     moves_and_first_pos_check = to_moves(x_check)
