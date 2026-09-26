@@ -175,26 +175,34 @@ def test_forces_are_the_rules_applied_to_the_state_at_that_tick():
     together. Nothing else can: forces taken from the following state still
     satisfy the equation above, because that only checks self-consistency.
     """
+    # shipped world: each label is its rule at the shipped softness, times its
+    # weight, then capped - the force that actually moved the bird
+    from boids import force_capper
+
     c = clip()
     ph = PHYSICS
+    soft, cap = ph.edge_softness, ph.max_force
 
     for t in (0, N_TICKS // 2, N_TICKS - 1):
         positions, velocities = c["positions"][t], c["velocities"][t]
         for i in range(N_SLOTS):
             np.testing.assert_allclose(
                 c["separation"][t][i],
-                ph.w_sep * calculate_separation(i, positions, ph.separation_radius,
-                                                ph.bounds, ph.sep_force_cap),
+                force_capper(ph.w_sep * calculate_separation(
+                    i, positions, ph.separation_radius, ph.bounds,
+                    ph.sep_force_cap, softness=soft), cap),
                 err_msg=f"separation label wrong at tick {t}, slot {i}")
             np.testing.assert_allclose(
                 c["alignment"][t][i],
-                ph.w_ali * calculate_alignment(i, positions, velocities,
-                                               ph.alignment_radius, ph.bounds),
+                force_capper(ph.w_ali * calculate_alignment(
+                    i, positions, velocities, ph.alignment_radius, ph.bounds,
+                    softness=soft), cap),
                 err_msg=f"alignment label wrong at tick {t}, slot {i}")
             np.testing.assert_allclose(
                 c["cohesion"][t][i],
-                ph.w_coh * calculate_cohesion(i, positions, ph.cohesion_radius,
-                                              ph.bounds),
+                force_capper(ph.w_coh * calculate_cohesion(
+                    i, positions, ph.cohesion_radius, ph.bounds,
+                    softness=soft), cap),
                 err_msg=f"cohesion label wrong at tick {t}, slot {i}")
 
     for rule in ("separation", "alignment", "cohesion"):

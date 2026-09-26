@@ -1,11 +1,12 @@
-from dataclasses import FrozenInstanceError, asdict
+from dataclasses import FrozenInstanceError, asdict, replace
 
 import numpy as np
 import pytest
 
 from boids import Physics, get_torus, velocity_capper
 from world import (ALIGNMENT_RADIUS, BOUNDS, COHESION_RADIUS, DT, MAX_SPEED,
-                   MIN_SPEED, PHYSICS, PHYSICS_CRUISING, SEPARATION_RADIUS)
+                   MIN_SPEED, PHYSICS, PHYSICS_CRUISING, PHYSICS_V1,
+                   SEPARATION_RADIUS)
 
 
 def test_short_delta_passes_through_untouched():
@@ -220,17 +221,22 @@ def test_the_test_baseline_tracks_the_shipped_config():
     can differ again and this is what notices.
 
     PHYSICS_CRUISING is the shipped config verbatim. PHYSICS is the same world
-    with the speed floor switched off, and that is the *only* difference.
+    with the speed floor, the soft radius edges and the force cap switched off,
+    and those are the *only* differences.
     """
     assert PHYSICS_CRUISING == Physics(), (
         "PHYSICS_CRUISING must be boids.py's Physics() unchanged")
 
     shipped, baseline = asdict(Physics()), asdict(PHYSICS)
     differing = {k for k in shipped if shipped[k] != baseline[k]}
-    assert differing == {"min_speed"}, (
+    assert differing == {"min_speed", "edge_softness", "max_force"}, (
         f"the test baseline differs from the shipped config in {differing}, "
-        "but min_speed is the only difference it is allowed to have"
+        "but min_speed, edge_softness and max_force are the only differences "
+        "it is allowed to have"
     )
+    assert (PHYSICS.min_speed, PHYSICS.edge_softness, PHYSICS.max_force) == (0.0, 0.0, None)
+    assert PHYSICS_V1 == replace(Physics(), edge_softness=0.0, max_force=None), (
+        "PHYSICS_V1 must be the shipped config with only the soft edges and the cap off")
 
     # And the module-level names must be the config's own values, not copies.
     # Checking only the Physics objects leaves the original bug available: a

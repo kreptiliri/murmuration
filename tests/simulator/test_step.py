@@ -347,27 +347,34 @@ def test_recorded_forces_match_the_rules_applied_to_the_input_state():
     that invariant only checks that the recorded numbers reproduce the velocity
     update - not which world they were measured in.
     """
+    # the shipped world: soft radius edges and the per-rule cap, so each label
+    # is its rule at the shipped softness, times its weight, then capped
+    from boids import force_capper
+
     physics = PHYSICS_CRUISING
     positions, velocities = random_flock(seed=7, n_birds=12)
 
     _, _, forces = step(positions, velocities, physics)
 
+    soft, cap = physics.edge_softness, physics.max_force
     for i in range(len(positions)):
         np.testing.assert_allclose(
             forces["separation"][i],
-            physics.w_sep * calculate_separation(
+            force_capper(physics.w_sep * calculate_separation(
                 i, positions, physics.separation_radius, physics.bounds,
-                physics.sep_force_cap),
+                physics.sep_force_cap, softness=soft), cap),
             err_msg=f"separation label wrong for bird {i}")
         np.testing.assert_allclose(
             forces["alignment"][i],
-            physics.w_ali * calculate_alignment(
-                i, positions, velocities, physics.alignment_radius, physics.bounds),
+            force_capper(physics.w_ali * calculate_alignment(
+                i, positions, velocities, physics.alignment_radius, physics.bounds,
+                softness=soft), cap),
             err_msg=f"alignment label wrong for bird {i}")
         np.testing.assert_allclose(
             forces["cohesion"][i],
-            physics.w_coh * calculate_cohesion(
-                i, positions, physics.cohesion_radius, physics.bounds),
+            force_capper(physics.w_coh * calculate_cohesion(
+                i, positions, physics.cohesion_radius, physics.bounds,
+                softness=soft), cap),
             err_msg=f"cohesion label wrong for bird {i}")
 
     # premise guard: a frozen flock would satisfy all of the above trivially

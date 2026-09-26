@@ -2,14 +2,16 @@ import numpy as np
 import pytest
 
 import boids
-from world import PHYSICS_CRUISING
+from world import PHYSICS_V1
 
 generate = pytest.importorskip("generate")
 windows = pytest.importorskip(
     "windows",
     reason="windows.py does not exist yet, this suite is its specification")
 
-PHYSICS = PHYSICS_CRUISING
+# sim-v1's world: in the capped world a copier predicts the velocity change
+# almost perfectly (0.99), so the target guard below could not tell targets apart
+PHYSICS = PHYSICS_V1
 N_CLIPS = 4
 N_SLOTS = 6
 N_TICKS = 150 # long enough that some birds cross the seam

@@ -201,10 +201,12 @@ def floor_one_dataset(tmp_path_factory):
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from world import PHYSICS_CRUISING
+    from world import PHYSICS_V1
 
+    # sim-v1's world: under the force cap no bird reaches the floor in 40
+    # ticks, so the clamp never fires and nothing here would be tested
     out = tmp_path_factory.mktemp("residual_floor_one")
-    generate.build_dataset(PHYSICS_CRUISING, n_clips=6, n_slots=N_SLOTS,
+    generate.build_dataset(PHYSICS_V1, n_clips=6, n_slots=N_SLOTS,
                            n_live=N_SLOTS, n_ticks=40, base_seed=20260920,
                            out_dir=out, allow_dirty=True)
     return out
@@ -217,10 +219,10 @@ def floor_two_dataset(tmp_path_factory):
     from dataclasses import replace
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from world import PHYSICS_CRUISING
+    from world import PHYSICS_V1
 
     out = tmp_path_factory.mktemp("residual_floor_two")
-    generate.build_dataset(replace(PHYSICS_CRUISING, min_speed=2.0), n_clips=6,
+    generate.build_dataset(replace(PHYSICS_V1, min_speed=2.0), n_clips=6,
                            n_slots=N_SLOTS, n_live=N_SLOTS, n_ticks=40,
                            base_seed=20260920, out_dir=out, allow_dirty=True)
     return out

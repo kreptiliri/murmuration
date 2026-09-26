@@ -1,6 +1,6 @@
 # The test suite
 
-395 tests, ~17 seconds. `pytest -q` from the repo root.
+475 tests, ~18 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -17,9 +17,11 @@ holds:
 | `forces/` | `test_separation.py` | `calculate_separation` | 11 |
 | | `test_alignment.py` | `calculate_alignment` | 6 |
 | | `test_cohesion.py` | `calculate_cohesion` | 11 |
+| | `test_soft_edges.py` | `edge_weight()`, and the three rules fading a neighbour out near each radius | 54 |
 | `simulator/` | `test_step.py` | one tick: the integrator, the constants, the label invariants | 20 |
 | | `test_rollout.py` | hundreds of ticks: what only shows up over time | 13 |
 | | `test_symmetries.py` | the three exact symmetries of `step`: relabelling the birds, sliding the flock, the eight square symmetries of the torus | 37 |
+| | `test_force_cap.py` | `force_capper()`, the per-rule cap inside `step`, the two new `Physics` constants | 26 |
 | `dataset/` | `test_generate.py` | `polarisation()`, and `generate_clip()`: one clip in memory | 24 |
 | | `test_dataset.py` | `build_dataset()`: many clips, on disk, with provenance | 28 |
 | | `test_windows.py` | `build_windows()`: clips cut into training windows | 24 |
@@ -50,7 +52,7 @@ and raises nothing.
 
 The two words below are not equally strong.
 
-**The six simulator files** (`primitives/`, `forces/`, `simulator/`) **are
+**The eight simulator files** (`primitives/`, `forces/`, `simulator/`) **are
 mutation-checked.** Every bug a test claims to catch was introduced into
 `boids.py` deliberately and the test was watched failing. A test nobody has
 watched fail is a test nobody has tested. Five were written *because* they
@@ -72,10 +74,13 @@ itself was mean velocity over mean speed rather than the length of the mean
 0.43 by the first and 0.0 by the second.
 
 `world.py` holds the shared constants, so no file can drift about the size of
-the world. `PHYSICS` pins `min_speed=0.0`, no floor, so every test written
-before the floor existed still means what it meant then; `PHYSICS_CRUISING` is
-the same world with the floor on. Tests that vary one constant use
-`dataclasses.replace(PHYSICS, thing=...)`.
+the world. `PHYSICS_CRUISING` is the shipped world: floor on, soft radius edges,
+per-rule force cap. `PHYSICS_V1` is the world as frozen at sim-v1: floor on,
+hard edges, no cap; the windows, dataset and residual tests use it, because
+their flocks must settle soon enough and a copier must not predict them almost
+perfectly. `PHYSICS` is sim-v1 with the floor off as well, so every test written
+before the floor, the soft edges and the cap existed still means what it meant
+then. Tests that vary one constant use `dataclasses.replace(PHYSICS, thing=...)`.
 
 ---
 

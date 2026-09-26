@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from boids import Physics, velocity_capper
-from world import PHYSICS_CRUISING
+from world import PHYSICS_V1
 
 generate = pytest.importorskip("generate")
 
@@ -14,7 +14,9 @@ pytestmark = pytest.mark.skipif(
     reason="generate.build_dataset() does not exist yet, this suite is its "
            "specification")
 
-PHYSICS = PHYSICS_CRUISING
+# sim-v1's world: its flocks settle soon enough for the settle_tick tests
+# (the capped world's settle far later, and the premise guard fails)
+PHYSICS = PHYSICS_V1
 N_CLIPS = 4
 N_SLOTS = 6
 N_TICKS = 15                    # short on purpose: contract tests, not rollouts

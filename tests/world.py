@@ -14,10 +14,21 @@ from boids import Physics
 # class of divergence impossible rather than merely fixing today's instance.
 PHYSICS_CRUISING = Physics()
 
-# The same world with the speed floor switched off, so that every test written
-# before the floor existed still means exactly what it meant then. Tests that
-# vary one constant use dataclasses.replace(PHYSICS, thing=...).
-PHYSICS = replace(PHYSICS_CRUISING, min_speed=0.0)
+# The world as frozen at sim-v1: floor on, hard radius edges, no per-rule force
+# cap. For tests about windows, datasets and baselines rather than the physics,
+# which were written against it and need its flocks (they settle sooner, and a
+# copier cannot predict them almost perfectly). Fields Physics() does not have
+# yet are skipped, so this file still imports while boids.py is being changed;
+# test_the_test_baseline_tracks_the_shipped_config fails until they exist.
+_V1_OFF = {"edge_softness": 0.0, "max_force": None}
+PHYSICS_V1 = replace(PHYSICS_CRUISING, **{k: v for k, v in _V1_OFF.items()
+                                          if hasattr(PHYSICS_CRUISING, k)})
+
+# The same world with the speed floor switched off as well, so that every test
+# written before the floor, the soft edges and the cap existed still means
+# exactly what it meant then. Tests that vary one constant use
+# dataclasses.replace(PHYSICS, thing=...).
+PHYSICS = replace(PHYSICS_V1, min_speed=0.0)
 
 BOUNDS = PHYSICS.bounds
 SEPARATION_RADIUS = PHYSICS.separation_radius
