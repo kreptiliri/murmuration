@@ -101,6 +101,70 @@ class Block(torch.nn.Module):
         x = x + self.feedforward(self.norm_two(x))
         return x
 
+class RelAttention(torch.nn.Module): #Relative
+    def __init__(self, *, d_model, n_heads):
+        super().__init__()
+        if d_model % n_heads != 0:
+            raise ValueError("n_head must divide d_model !!")
+        self.n_heads = n_heads
+        self.d_head = d_model // n_heads #head dim with 32 and 4 heads, 4 heads of 8 each
+        self.q = torch.nn.Linear(d_model, d_model, bias=False)
+        self.k = torch.nn.Linear(d_model, d_model, bias=False)
+        self.v = torch.nn.Linear(d_model, d_model, bias=False)
+        self.proj = torch.nn.Linear(d_model, d_model, bias=False) #to mix heads back into shared width
+        #cool box that does FeedForward()
+        self.pair_bias = torch.nn.Sequential(torch.nn.Linear(3, 64), torch.nn.GELU(), torch.nn.Linear(64, self.n_heads)) #picks WHO to listen to
+        self.pair_value = torch.nn.Sequential(torch.nn.Linear(3, 64), torch.nn.GELU(), torch.nn.Linear(64, d_model))# add WHERE they are
+    
+
+    def forward(self, x, pair): #pair gemetry, (dx, dy, distance)
+        batch, T, d_model = x.shape
+        #each in (batch, 8 ,32)
+        q = self.q(x)
+        k = self.k(x)
+        v = self.v(x)
+        #split the width into heads (batch, 8, 32) -> (batch, 4, 8, 8), T=birds
+        q = q.view(batch, T, self.n_heads, self.d_head).transpose(1, 2)
+        k = k.view(batch, T, self.n_heads, self.d_head).transpose(1, 2)
+        v = v.view(batch, T, self.n_heads, self.d_head).transpose(1, 2)
+        
+        scores = q @ k.transpose(-2, -1) #-1 is last dimension of matrix, -2 is secnod to last
+        #transposing gets .shape from (batch,8,32) to (batch,32,8)
+        scores = scores / self.d_head ** 0.5 #scaling
+        bias = self.pair_bias(pair) # comes out (batch, i, j, heads)
+        bias = bias.permute(0, 3, 1, 2)
+        scores = scores + bias
+        weights = scores.softmax(dim=-1) #making every row sum up to 1
+        extra = self.pair_value(pair)
+        extra = extra.view(batch, T, T, self.n_heads, self.d_head)
+        #weights = batch, head, i ,j = bhij
+        #extra = batch, i, j, head, d_head
+        # want = batch, head, i, d_head
+        extra = torch.einsum("bhij,bijhd->bhid", weights, extra) #the coolest of them all, j in input but no output, so it gets summed (sigma over j)
+        out = weights @ v + extra #value embeddings * embedding full line.  + extra info about positions
+        
+        #v_x dot... + v_y dot ...
+        #stitch the heads back: (batch, 4, 8, 8) -> (batch, 8, 32)
+        out = out.transpose(1, 2).contiguous().view(batch, T, d_model)
+        out = self.proj(out) #new, beautifull embeddings
+
+        return out
+
+
+class RelBlock(torch.nn.Module):
+    def __init__(self, *, d_model, n_heads):
+        super().__init__()
+        self.norm_one = torch.nn.LayerNorm(d_model)
+        self.attention = RelAttention(d_model=d_model, n_heads=n_heads)
+        self.norm_two = torch.nn.LayerNorm(d_model)
+        self.feedforward = FeedForward(d_model=d_model)
+
+    def forward(self, x, pair):
+        #x + ... is the residual; the block starts as identity and tweaks from there
+        #norms go BEFORE, not after
+        x = x + self.attention(self.norm_one(x), pair)
+        x = x + self.feedforward(self.norm_two(x))
+        return x
 
 class Transformer(torch.nn.Module):
     def __init__(self, *, n_features, d_model, n_heads, n_blocks, max_context):
@@ -143,3 +207,26 @@ class PerBirdTransformer(torch.nn.Module):
         ans = self.head(self.norm(emb)) #each bird's answer
         return ans.reshape(batch, n_features)
 
+class RelPerBirdTransformer(torch.nn.Module):
+    def __init__(self, *, n_features, d_model, n_heads, n_blocks, context):
+        super().__init__()
+        if context < 2:
+            raise ValueError("context must be above or equal to 2")
+        self.embedding = torch.nn.Linear(2 * (context - 1), d_model)
+        self.blocks = torch.nn.ModuleList()
+        for _ in range(n_blocks):
+            self.blocks.append(RelBlock(d_model=d_model, n_heads=n_heads))
+        self.norm = torch.nn.LayerNorm(d_model)
+        self.head = torch.nn.Linear(d_model, 2)
+
+    def forward(self, x, pair):
+        x = x[:, 1:]
+        batch, T, n_features = x.shape
+        n_birds = n_features // 2
+        tokens = x.view(batch, T, n_birds, 2).permute(0, 2, 1, 3)
+        tokens = tokens.reshape(batch, n_birds, 2 * T)
+        emb = self.embedding(tokens)
+        for block in self.blocks:
+            emb = block(emb, pair)
+        ans = self.head(self.norm(emb)) #each bird's answer
+        return ans.reshape(batch, n_features)
