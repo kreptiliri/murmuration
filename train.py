@@ -148,6 +148,62 @@ def clamped_copier_baseline(position_windows, *, dt, min_speed, max_speed):
     length = np.where(length > 0, length, 1.0)
     final   = final * (wanted / length)
     return  (final.reshape(next_velocity.shape) - curr)
+def pair_geometry(position_windows, *, bounds, scale):
+    n_windows = len(position_windows)
+    #where every bird is now (last tick): (windows, birds, 2)
+    now = position_windows[:, -1].reshape(n_windows, -1, 2)
+    n_birds = now.shape[1]
+
+    pair = np.zeros((n_windows, n_birds, n_birds, 3), dtype=np.float32)
+    for i in range(n_birds):  #the listener
+        for j in range(n_birds):  #the speaker
+            #how to get from bird i to bird j: (windows, 2)
+            offset = now[:, j] - now[:, i]
+            #more than half the world away means its shorter the other way round
+            offset[offset > bounds / 2] -= bounds
+            offset[offset < -bounds / 2] += bounds 
+
+            dx = offset[:, 0]
+            dy = offset[:, 1]
+            distance = np.sqrt(dx ** 2 + dy ** 2)
+            #divided by the separation radius so the numbers sit near 1
+            pair[:, i, j, 0] = dx / scale
+            pair[:, i, j, 1] = dy / scale #cool syntax
+            pair[:, i, j, 2] = distance / scale
+    return pair
+
+def square_turn(points, quarter_turns, mirror):
+    #points; (..., 2) mirror flips x, then each quarter turn takes (x, y) to (-y, x)
+    x = points[..., 0]
+    y = points[..., 1]
+    if mirror:
+        x = -x
+    for _ in range(quarter_turns): #for example, east (1, 0) becomes north (0, 1)
+        x, y = -y, x
+    return np.stack([x, y], axis=-1)
+
+def symmetry_augment(position_windows, targets, rng, *, bounds): #add one random (x, y) amount to every bird at every tick
+    n_windows, T, n_features = position_windows.shape
+    #(windows, ticks, birds, 2) so each bird's x and y sit together
+
+    positions, answers = position_windows.reshape(n_windows, T, -1, 2), targets.reshape(n_windows, -1, 2) 
+    new_positions, new_answers = np.empty_like(positions), np.empty_like(answers)
+    pos_shape, targ_shape = position_windows.shape, targets.shape
+
+    for w in range(n_windows):
+        #slide: one random amount for the whole window, every bird, every tick
+        slid = positions[w] + rng.uniform(0, bounds, size=2)
+        #turn: one of the 8 square symmetries, the same one for the birds and the answers
+        quarter_turns = rng.integers(4)
+        mirror = rng.random() < 0.5
+        turned = square_turn(slid, quarter_turns, mirror)
+        new_answers[w] = square_turn(answers[w], quarter_turns, mirror)
+        #back in the box: shift each bird so its first tick lands in [0, bounds),
+        #and move its later ticks by the same amount so the path stays unbroken
+        shift = bounds * np.floor(turned[0] / bounds)
+        new_positions[w] = turned - shift
+    return new_positions.reshape(pos_shape), new_answers.reshape(targ_shape)
+
     
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Train on a window of positions.")
