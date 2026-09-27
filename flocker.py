@@ -219,14 +219,26 @@ class RelPerBirdTransformer(torch.nn.Module):
         self.norm = torch.nn.LayerNorm(d_model)
         self.head = torch.nn.Linear(d_model, 2)
 
-    def forward(self, x, pair):
+
+    def hidden_states(self, x, pair):
         x = x[:, 1:]
         batch, T, n_features = x.shape
         n_birds = n_features // 2
         tokens = x.view(batch, T, n_birds, 2).permute(0, 2, 1, 3)
         tokens = tokens.reshape(batch, n_birds, 2 * T)
         emb = self.embedding(tokens)
+        #save draft 0 right after embedding
+        drafts = [emb]
         for block in self.blocks:
             emb = block(emb, pair)
+            drafts.append(emb)
+        return drafts
+
+    def forward(self, x, pair):
+        batch, _, n_features = x.shape
+        drafts = self.hidden_states(x, pair)
+        emb = drafts[-1]#the final prediction comes from the last draft (after all blocks)
         ans = self.head(self.norm(emb)) #each bird's answer
         return ans.reshape(batch, n_features)
+
+    
