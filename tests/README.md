@@ -1,6 +1,6 @@
 # The test suite
 
-576 tests, ~20 seconds. `pytest -q` from the repo root.
+592 tests, ~20 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -48,6 +48,7 @@ holds:
 | | `test_symmetry_augment.py` | `symmetry_augment()`: sliding and turning each window, answers turned with it | 14 |
 | | `test_rel_per_bird_choice.py` | `--model rel_per_bird` and `--symmetries` reaching the training loop | 16 |
 | | `test_log_checkpoints.py` | `log_steps()` and `--log-checkpoints`: snapshots inside a pass, dense early and sparse later | 14 |
+| `site/` | `test_model_rollout.py` | `rollout()`: one saved model flying the flock by itself, the frames of the training slider | 16 |
 | `tests/` | `test_imports_are_clean.py` | nothing tracked imports an untracked file, so a clone runs | 16 |
 
 `forces/` is the one to be most careful with. Those three files test the
