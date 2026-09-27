@@ -1,6 +1,6 @@
 # The test suite
 
-592 tests, ~20 seconds. `pytest -q` from the repo root.
+606 tests, ~20 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -35,6 +35,7 @@ holds:
 | | `test_rel_attention.py` | `RelAttention`: attention with a learned bonus and a learned message per pair of birds, checked against the computation written out by hand | 14 |
 | | `test_rel_block.py` | `RelBlock`: your block with that attention swapped in | 5 |
 | | `test_rel_per_bird_transformer.py` | `RelPerBirdTransformer`: moves in, positions only through the pair geometry, relabelling still relabels the answers | 18 |
+| | `test_hidden_states.py` | `RelPerBirdTransformer.hidden_states()`: every bird's numbers after the embedding and after each block, what the probes read | 11 |
 | `training/` | `test_train.py` | `split_by_clip`, the scaler pair, `build_model`, `skill` | 24 |
 | | `test_model_choice.py` | `--model` and `--augment` reaching the training loop | 16 |
 | | `test_permute_slots.py` | `permute_slots()`: relabelling the birds as augmentation | 14 |
@@ -49,7 +50,7 @@ holds:
 | | `test_rel_per_bird_choice.py` | `--model rel_per_bird` and `--symmetries` reaching the training loop | 16 |
 | | `test_log_checkpoints.py` | `log_steps()` and `--log-checkpoints`: snapshots inside a pass, dense early and sparse later | 14 |
 | `site/` | `test_model_rollout.py` | `rollout()`: one saved model flying the flock by itself, the frames of the training slider | 16 |
-| `tests/` | `test_imports_are_clean.py` | nothing tracked imports an untracked file, so a clone runs | 16 |
+| `tests/` | `test_imports_are_clean.py` | nothing tracked imports an untracked file, so a clone runs | 19 |
 
 `forces/` is the one to be most careful with. Those three files test the
 functions whose output becomes the ground-truth label for every probe and every
