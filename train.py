@@ -79,7 +79,17 @@ def build_model(*, context, n_features, kind="linear",
     raise ValueError(f"unknown model kind {kind!r}, expected 'linear' or 'transformer' or 'per_bird' or 'rel_per_bird'")
 
 
-
+def log_steps(per_doubling, last):
+    #which batches get a snapshot; per_doubling of them between each doubling
+    steps = []
+    i = 0
+    while round(2 ** (i / per_doubling)) <= last: #if per doubling2, 2^0, 2^1/2, 2^1, 2^3/2 ..., 
+        step = round(2 ** (i / per_doubling)) #rounded to 1, 1, 2, 3
+        if step not in steps:
+            steps.append(step)
+        i += 1
+    return steps
+    
 def save_checkpoint(path, *, model, pass_number, config, x_scaler, y_scaler, score=None):
     torch.save({"state_dict": model.state_dict(), "pass_number": pass_number, "config": config, "x_scaler": x_scaler, "y_scaler": y_scaler, "score": score}, path)
     #pass is look through trsining pile
@@ -239,6 +249,7 @@ def main(argv=None):
     #0 is never, a 1000-pass sweep must not start filling the disk by accident
     parser.add_argument("--checkpoint-every", type=int, default=0)
     parser.add_argument("--checkpoint-dir", default="checkpoints")
+    parser.add_argument("--log-checkpoints", type=int, default=0)
     args = parser.parse_args(argv)
 
     with open(Path(args.data) / "config.json") as config_file:
@@ -298,9 +309,16 @@ def main(argv=None):
     shuffler = np.random.default_rng(args.seed)
     run = 0
     start_time = time.time()
-    if args.checkpoint_every:
+    if args.checkpoint_every or args.log_checkpoints:
         checkpoint_dir = Path(args.checkpoint_dir)
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        batches_per_pass = len(range(0, len(x_learn), args.batch)) #counting batches (using x learn)
+        total_batches = batches_per_pass * args.passes
+    snapshot_at = []
+    if args.log_checkpoints:
+         snapshot_at = log_steps(args.log_checkpoints, total_batches) + [total_batches]
+         save_checkpoint(checkpoint_dir / "step_00000000.pt", model=model, pass_number=0, config=model_config, x_scaler=X_mean_std, y_scaler=Y_mean_std)
+    step = 0
 
     
     for passes in range(args.passes): #selection pass 0 as untrained for the model, plot starting from (0.0)
@@ -312,7 +330,7 @@ def main(argv=None):
 
         for start in range(0, len(x_learn), args.batch):
             #raw windows, so the permutation happens before to_moves and before
-            #the scaler - permuting scaled data mixes columns that were divided
+            #the scaler, permuting scaled data mixes columns that were divided
             #by different numbers, and nothing raises
             rows = indices[start:start+args.batch]
             raw_batch, true_velo_batches = x_learn[rows], residual_learn[rows]
@@ -334,6 +352,10 @@ def main(argv=None):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            #keeping every nudge corresonponding to its own photo
+            step += 1
+            if step in snapshot_at:
+              save_checkpoint(checkpoint_dir / f"step_{step:08d}.pt", model=model, pass_number=step / batches_per_pass, config=model_config, x_scaler=X_mean_std, y_scaler=Y_mean_std)
             total += loss.item()
             batches_number += 1
 
