@@ -1,6 +1,6 @@
 # The test suite
 
-475 tests, ~18 seconds. `pytest -q` from the repo root.
+562 tests, ~20 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -32,6 +32,9 @@ holds:
 | | `test_block.py` | one block: pre-norms and residual connections, against PyTorch's own | 6 |
 | | `test_transformer.py` | the whole model: shapes, determinism, parameter count | 8 |
 | | `test_per_bird_transformer.py` | `PerBirdTransformer`: one token per bird, every bird hears every other, relabelling the birds relabels the answers | 10 |
+| | `test_rel_attention.py` | `RelAttention`: attention with a learned bonus and a learned message per pair of birds, checked against the computation written out by hand | 14 |
+| | `test_rel_block.py` | `RelBlock`: your block with that attention swapped in | 5 |
+| | `test_rel_per_bird_transformer.py` | `RelPerBirdTransformer`: moves in, positions only through the pair geometry, relabelling still relabels the answers | 18 |
 | `training/` | `test_train.py` | `split_by_clip`, the scaler pair, `build_model`, `skill` | 24 |
 | | `test_model_choice.py` | `--model` and `--augment` reaching the training loop | 16 |
 | | `test_permute_slots.py` | `permute_slots()`: relabelling the birds as augmentation | 14 |
@@ -41,6 +44,9 @@ holds:
 | | `test_per_bird_choice.py` | `--model per_bird` reaching the training loop and its checkpoints | 4 |
 | | `test_shared_squasher.py` | `shared_squasher()`: one scaler for every bird, used by `--model per_bird` only | 19 |
 | | `test_settled_only.py` | `--settled-only`: training and scoring on settled windows only | 9 |
+| | `test_pair_geometry.py` | `pair_geometry()`: offset and distance around the torus for every pair of birds | 20 |
+| | `test_symmetry_augment.py` | `symmetry_augment()`: sliding and turning each window, answers turned with it | 14 |
+| | `test_rel_per_bird_choice.py` | `--model rel_per_bird` and `--symmetries` reaching the training loop | 16 |
 | `tests/` | `test_imports_are_clean.py` | nothing tracked imports an untracked file, so a clone runs | 16 |
 
 `forces/` is the one to be most careful with. Those three files test the
@@ -61,11 +67,12 @@ caught a real bug in real code, and those are marked.
 **The `dataset/`, `training/` and `transformer/` files were written before the
 code they test**, as its specification. That is evidence of a different kind,
 since the interface could not be bent to fit whatever got written, but it is not
-the same as watching each test fail for the right reason. Seven have since been
+the same as watching each test fail for the right reason. Thirteen have since been
 run against deliberately broken implementations, and every break turned them
 red: `test_permute_slots.py`, `test_model_choice.py`, `test_residual.py`,
-`test_per_bird_transformer.py`, `test_shared_squasher.py`, `test_settled_mask.py`
-and `test_settled_only.py`. Two were checked
+`test_per_bird_transformer.py`, `test_shared_squasher.py`, `test_settled_mask.py`,
+`test_settled_only.py`, and the six relative-position files, against 41 breaks.
+Two were checked
 harder, both times because something was wrong. `settle_tick_matches_a_recomputation`
 was vacuous, since at the fixture's clip length nothing reached
 polarisation 0.99 and a hardcoded `-1` passed; and the polarisation definition
