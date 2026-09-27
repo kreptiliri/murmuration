@@ -1,6 +1,6 @@
 # The test suite
 
-606 tests, ~20 seconds. `pytest -q` from the repo root.
+616 tests, ~20 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -26,6 +26,7 @@ holds:
 | | `test_dataset.py` | `build_dataset()`: many clips, on disk, with provenance | 28 |
 | | `test_windows.py` | `build_windows()`: clips cut into training windows | 24 |
 | | `test_settled_mask.py` | `settled_mask()`: which windows start after the flock has settled | 14 |
+| | `test_force_labels.py` | `build_force_labels()`: each window's three real pushes, from the right tick, the answer key for the probes | 10 |
 | `transformer/` | `test_input.py` | `InputEmbedding`: each tick widened, and stamped with its position | 6 |
 | | `test_attention.py` | `CausalSelfAttention`, checked against PyTorch's own on a fixed input | 8 |
 | | `test_feedforward.py` | `FeedForward`, and that it is genuinely nonlinear | 6 |
