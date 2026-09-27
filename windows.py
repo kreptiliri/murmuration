@@ -61,6 +61,36 @@ def build_windows(dataset_dir, *, context, clips=None):
     return np.array(inputs), np.array(targets)
 
 
+def build_force_labels(dataset_dir, *, context, clips=None):
+    #the real pushes behind each window's answer, same windows in the same order as build_windows
+    dataset_dir = Path(dataset_dir)
+    with np.load(dataset_dir / "clips.npz") as clips_data:
+        separation = clips_data["separation"]
+        alignment = clips_data["alignment"]
+        cohesion = clips_data["cohesion"]
+        n_states = clips_data["positions"].shape[1]
+
+    if clips is None:
+        clip_indices = range(separation.shape[0]) #axis 0 = clips
+    elif isinstance(clips, int): 
+        clip_indices = [clips] #zero clips would be [], not 0, good
+    else:
+        clip_indices = list(clips) #a generator would be consumed by the first use
+    n_windows_clip = n_states - context
+    #need at MOST (nstates-1) contexts (max = nstates -1)
+    if n_windows_clip <= 0: #n states<context
+        raise ValueError("context is too large for the dataset state length")
+
+    sep_rows, ali_rows, coh_rows = [], [], []
+    
+    for c in clip_indices:
+        for offset in range(n_windows_clip):
+            last_tick = offset + context - 1
+            sep_rows.append(separation[c, last_tick])
+            ali_rows.append(alignment[c, last_tick])
+            coh_rows.append(cohesion[c, last_tick])
+    return {"separation": np.array(sep_rows), "alignment": np.array(ali_rows), "cohesion": np.array(coh_rows)}
+
 def settled_mask(dataset_dir, *, context, clips=None):
     #one flag per window
     if context < 1:
