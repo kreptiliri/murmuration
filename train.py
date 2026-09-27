@@ -71,8 +71,12 @@ def build_model(*, context, n_features, kind="linear",
         return flocker.PerBirdTransformer(n_features=n_features, d_model=d_model,
                                           n_heads=n_heads, n_blocks=n_blocks,
                                           context=context)
-    #a typo must not quietly train the wrong model for an hour
-    raise ValueError(f"unknown model kind {kind!r}, expected 'linear' or 'transformer' or 'per_bird'")
+    if kind == "rel_per_bird":
+            return flocker.RelPerBirdTransformer(n_features=n_features, d_model=d_model,
+                                              n_heads=n_heads, n_blocks=n_blocks,
+                                              context=context)
+    
+    raise ValueError(f"unknown model kind {kind!r}, expected 'linear' or 'transformer' or 'per_bird' or 'rel_per_bird'")
 
 
 
@@ -148,6 +152,7 @@ def clamped_copier_baseline(position_windows, *, dt, min_speed, max_speed):
     length = np.where(length > 0, length, 1.0)
     final   = final * (wanted / length)
     return  (final.reshape(next_velocity.shape) - curr)
+
 def pair_geometry(position_windows, *, bounds, scale):
     n_windows = len(position_windows)
     #where every bird is now (last tick): (windows, birds, 2)
@@ -204,6 +209,8 @@ def symmetry_augment(position_windows, targets, rng, *, bounds): #add one random
         new_positions[w] = turned - shift
     return new_positions.reshape(pos_shape), new_answers.reshape(targ_shape)
 
+
+
     
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Train on a window of positions.")
@@ -217,10 +224,12 @@ def main(argv=None):
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--report-every", type=int, default=50)
-    parser.add_argument("--model", choices=["linear", "transformer", "per_bird"], default="linear")
+    parser.add_argument("--model", choices=["linear", "transformer", "per_bird", "rel_per_bird"], default="linear")
     #relabelling the birds is an exact symmetry of the simulator, so a permuted
     #window is an example it could have produced and did not
     parser.add_argument("--augment", action="store_true")
+    #slide and turn each learn window (one of the 8 square symmetries), answers turned with it to bully the model
+    parser.add_argument("--symmetries", action="store_true")
     #only windows after settling
     parser.add_argument("--settled-only", action="store_true")
     #the baseline is a function of the window alone, so subtracting it rewords
@@ -238,6 +247,7 @@ def main(argv=None):
     #the wrong one silently
     dt = physics["dt"]
     min_speed, max_speed = physics["min_speed"], physics["max_speed"]
+    bounds, scale = physics["bounds"], physics["separation_radius"]
 
     learn, check = split_by_clip(args.clips, train_fraction=args.train_fraction)
     x_learn, y_learn = windows.build_windows(args.data, context=args.context, clips=learn)
@@ -269,12 +279,15 @@ def main(argv=None):
     #residuals are far smaller than the targets they came from
     residual_learn, residual_check = y_learn - baseline_learn, y_check - baseline_check
     
-    squash = shared_squasher if args.model == "per_bird" else squasher
+    squash = shared_squasher if args.model == "per_bird" or args.model == "rel_per_bird" else squasher
     X_mean_std, Y_mean_std = squash(moves_and_first_pos_learn), squash(residual_learn)
 
     X_check, Y_check = apply_squash(X_mean_std, moves_and_first_pos_check), apply_squash(Y_mean_std, residual_check)
 
     X_tensor_check, Y_tensor_check = torch.from_numpy(X_check).float(), torch.from_numpy(Y_check).float()
+    relative = args.model == "rel_per_bird"
+    if relative: #buildking pair geometry
+        pair_check = torch.from_numpy(pair_geometry(x_check, bounds=bounds, scale=scale))
     torch.manual_seed(args.seed)
     model_config = {"kind":args.model, "context": args.context, "n_features": x_learn.shape[2], "d_model": 128, "n_heads": 4, "n_blocks": 2}
     model = build_model(**model_config)
@@ -305,11 +318,18 @@ def main(argv=None):
             raw_batch, true_velo_batches = x_learn[rows], residual_learn[rows]
             if args.augment:
                 raw_batch, true_velo_batches = permute_slots(raw_batch, true_velo_batches, shuffler)
+            if args.symmetries: #shuffles either way, before going through to_moves and squashing
+                raw_batch, true_velo_batches = symmetry_augment(raw_batch, true_velo_batches, shuffler, bounds=bounds)
             pos_batches = torch.from_numpy(
                 apply_squash(X_mean_std, to_moves(raw_batch))).float()
             true_velo_batches = torch.from_numpy(
                 apply_squash(Y_mean_std, true_velo_batches)).float()
-            prediction = model(pos_batches)
+            if relative:
+                pair = torch.from_numpy(pair_geometry(raw_batch, bounds=bounds, scale=scale))
+                prediction = model(pos_batches, pair)
+            else:
+                prediction = model(pos_batches)
+
             loss = loss_function(prediction, true_velo_batches) #computes average wrongness across batch to one number, to pass down to backwards(only accept 1 number)
             optimizer.zero_grad()
             loss.backward()
@@ -332,7 +352,11 @@ def main(argv=None):
         predicts = []
         for start in range(0, len(X_tensor_check), args.batch):
             check_batches = X_tensor_check[start:start+args.batch]
-            predict_check = model(check_batches)
+            if relative:
+                predict_check = model(check_batches, pair_check[start:start+args.batch])
+            else:
+                predict_check = model(check_batches)
+            
             predicts.append(predict_check)
         stacked = torch.cat(predicts) #stack to one array
         #the model only ever predicted the leftover, so the baseline goes back on
