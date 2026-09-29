@@ -1,6 +1,6 @@
 # The test suite
 
-648 tests, ~20 seconds. `pytest -q` from the repo root.
+666 tests, ~20 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -54,6 +54,8 @@ holds:
 | `probes/` | `test_probe.py` | `fit_probe()`, `probe_predict()`, `probe_r2()`: the straight-line reader, fitted on some pages and scored on new ones | 11 |
 | | `test_read_drafts.py` | `read_drafts()`: real windows through one snapshot, every bird's draft as a page, in the order the labels come in | 8 |
 | | `test_readability.py` | `pick_clips()`, `readability()`, `main()`: every rule on every draft, untrained vs trained, and the gain | 10 |
+| | `test_readability_curve.py` | `readability_curve()` and `main --sweep`: every in-pass snapshot's scores, in training order, saved to a file | 7 |
+| | `test_plot_readability.py` | `plot_readability`: one panel per rule, one curve per draft, the untrained score dashed, the end of pass 1 marked, log or `--linear` x-axis | 11 |
 | `tests/` | `test_imports_are_clean.py` | nothing tracked imports an untracked file, so a clone runs | 22 |
 
 `forces/` is the one to be most careful with. Those three files test the
