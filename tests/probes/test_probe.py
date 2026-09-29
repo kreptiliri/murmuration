@@ -124,3 +124,25 @@ def test_an_enormous_penalty_just_guesses_the_average():
     y = hidden_rule(x)
     fitted = probe.fit_probe(x, y, alpha=1e12)
     assert probe.probe_r2(fitted, x, y) == pytest.approx(0.0, abs=1e-6)
+
+
+# --- precision ---------------------------------------------------------------------------------
+
+def test_a_fit_never_scores_below_zero_on_its_own_practice_pages():
+    """Guessing the average already scores 0 there, and the fit is the best
+    guess it can find, so it can only do as well or better.
+
+    Real drafts from an untrained network came in as float32 pages with
+    boxes that mostly repeat each other. Fitted in float32, the probe scored
+    -0.53 on its own practice pages and dragged every untrained control
+    below zero, which made the gains look bigger than 1. This makes the
+    same kind of pages: a few loud shared directions and the push hidden in
+    the faint ones."""
+    rng = np.random.default_rng(0)
+    n = 50000
+    loud = rng.normal(size=(n, 3)) @ rng.normal(size=(3, 32)) * 100
+    faint = rng.normal(size=(n, 32))
+    x = (loud + 0.1 * faint).astype(np.float32)
+    y = faint[:, :2] + 0.5 * rng.normal(size=(n, 2))
+    fitted = probe.fit_probe(x, y, alpha=1e-6)
+    assert probe.probe_r2(fitted, x, y) > 0.7
