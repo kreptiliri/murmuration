@@ -98,6 +98,32 @@ def readability(checkpoint, learn_windows, learn_labels, check_windows, check_la
     return scores
 
 
+def batch_of(path):
+    #step_00000123.pt -> 123
+    name = Path(path).stem
+    number = name.split("_")[1]
+    return int(number)
+
+
+def step_files(checkpoint_dir):
+    #the in pass snapshots only, not the pass_ files, in training order
+    #(the zero padding in the names makes sorted() put them in order)
+    return sorted(Path(checkpoint_dir).glob("step_*.pt"))
+
+
+def readability_curve(checkpoint_dir, learn_windows, learn_labels, check_windows, check_labels, *, physics, alpha):
+    #the same comparison as readability(), once for every snapshot
+    rows = []
+    for path in step_files(checkpoint_dir):
+        checkpoint = train.load_checkpoint(path)
+        scores = readability(checkpoint, learn_windows, learn_labels, check_windows, check_labels,
+                             physics=physics, alpha=alpha)
+        rows.append({"batch": batch_of(path),
+                     "pass": float(checkpoint["pass_number"]),
+                     "scores": scores})
+    return rows
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint-dir", required=True)
@@ -109,51 +135,81 @@ def main(argv=None):
     parser.add_argument("--untrained-batch", type=int, default=None)
     parser.add_argument("--trained-batch", type=int, default=None)
     parser.add_argument("--alpha", type=float, default=1.0)
+    #every snapshot instead of two, for the curves
+    parser.add_argument("--sweep", action="store_true")
     parser.add_argument("--out", default=None)
     args = parser.parse_args(argv)
+    if args.sweep and args.out is None:
+        parser.error("--sweep takes minutes, give it --out so the result is kept")
 
     with open(Path(args.data) / "config.json") as config_file:
         physics = json.load(config_file)["physics"]
 
-    batches = sorted(int(path.stem.split("_")[1]) for path in Path(args.checkpoint_dir).glob("step_*.pt"))
-
-    if not batches:
+    paths = step_files(args.checkpoint_dir)
+    if len(paths) == 0:
         raise ValueError(f"no step_*.pt in {args.checkpoint_dir}, train with --log-checkpoints")
-    
-    untrained_batch = batches[0] if args.untrained_batch is None else args.untrained_batch
-    trained_batch = batches[-1] if args.trained_batch is None else args.trained_batch
+
+    #by default the first snapshot is the untrained one and the last is the finished model
+    if args.untrained_batch is None:
+        untrained_batch = batch_of(paths[0])
+    else:
+        untrained_batch = args.untrained_batch
+    if args.trained_batch is None:
+        trained_batch = batch_of(paths[-1])
+    else:
+        trained_batch = args.trained_batch
 
     #the windows are built at the context the snapshots were trained on
-    context = train.load_checkpoint(Path(args.checkpoint_dir) / f"step_{trained_batch:08d}.pt")["config"]["context"]
+    last_checkpoint = train.load_checkpoint(paths[-1])
+    context = last_checkpoint["config"]["context"]
+
     learn, check = pick_clips(args.clips, learn_clips=args.learn_clips, check_clips=args.check_clips)
     learn_windows, _ = windows.build_windows(args.data, context=context, clips=learn)
     check_windows, _ = windows.build_windows(args.data, context=context, clips=check)
     learn_labels = windows.build_force_labels(args.data, context=context, clips=learn)
     check_labels = windows.build_force_labels(args.data, context=context, clips=check)
 
-    result = {"untrained_batch": untrained_batch, "trained_batch": trained_batch,
-              "learn_clips": args.learn_clips, "check_clips": args.check_clips, "alpha": args.alpha}
-    
+    if args.sweep:
+        curve = readability_curve(args.checkpoint_dir, learn_windows, learn_labels, check_windows, check_labels,
+                                  physics=physics, alpha=args.alpha)
+        saved = {"curve": curve,
+                 "learn_clips": args.learn_clips,
+                 "check_clips": args.check_clips,
+                 "alpha": args.alpha}
+        Path(args.out).write_text(json.dumps(saved, indent=1))
+        print(f"{len(curve)} snapshots scored, saved to {args.out}")
+        return saved
+
+    result = {"untrained_batch": untrained_batch,
+              "trained_batch": trained_batch,
+              "learn_clips": args.learn_clips,
+              "check_clips": args.check_clips,
+              "alpha": args.alpha}
+
     for name, batch in [("untrained", untrained_batch), ("trained", trained_batch)]:
         checkpoint = train.load_checkpoint(Path(args.checkpoint_dir) / f"step_{batch:08d}.pt")
-
         if checkpoint["config"]["context"] != context:
             raise ValueError(f"batch {batch} has context {checkpoint['config']['context']}, the windows have {context}")
         result[name] = readability(checkpoint, learn_windows, learn_labels, check_windows, check_labels,
                                    physics=physics, alpha=args.alpha)
+
     #the part training added, on top of what random weights already show
     result["gain"] = {}
     for rule in RULES:
-        result["gain"][rule] = [trained - untrained for trained, untrained
-                                in zip(result["trained"][rule], result["untrained"][rule])]
+        result["gain"][rule] = []
+        for k in range(len(result["trained"][rule])):
+            gain = result["trained"][rule][k] - result["untrained"][rule][k]
+            result["gain"][rule].append(gain)
 
     print(f"held-out R2 of the probe, batch {untrained_batch} (untrained) vs batch {trained_batch} (trained)")
     for rule in RULES:
         for k in range(len(result["gain"][rule])):
-            print(f"  {rule:10s} draft {k}   untrained {result['untrained'][rule][k]:+.3f}"
-                  f"   trained {result['trained'][rule][k]:+.3f}   gain {result['gain'][rule][k]:+.3f}")
-            
-    if args.out:
+            untrained = result["untrained"][rule][k]
+            trained = result["trained"][rule][k]
+            gain = result["gain"][rule][k]
+            print(f"  {rule:10s} draft {k}   untrained {untrained:+.3f}   trained {trained:+.3f}   gain {gain:+.3f}")
+
+    if args.out is not None:
         Path(args.out).write_text(json.dumps(result, indent=1))
     return result
 
