@@ -1,9 +1,22 @@
+import argparse
+import json
+from pathlib import Path
+
 import numpy as np
 import torch
+
 import train
-import flocker
+import windows
+
+RULES = ("separation", "alignment", "cohesion")
+
+
 def fit_probe(features, targets, *, alpha):
     #features: (pages, boxes), targets: (pages, 2), the real push for each page
+    #float64: drafts come in float32 (7 digits), and when the boxes mostly repeat
+    #each other the fit needs more digits than that, or it scores below zero
+    features = np.asarray(features, dtype=np.float64)
+    targets = np.asarray(targets, dtype=np.float64)
     #every box on the same scale, like squasher in train.py
     mean = features.mean(axis=0)
     std = features.std(axis=0)
@@ -19,6 +32,7 @@ def fit_probe(features, targets, *, alpha):
 
 
 def probe_predict(probe, features):
+    features = np.asarray(features, dtype=np.float64)
     x = (features - probe["mean"]) / probe["std"]#new pages, scaled with the TRAINING mean and std
     return x @ probe["weights"] + probe["bias"]
 
@@ -54,3 +68,95 @@ def read_drafts(checkpoint, position_windows, *, physics):
     for k in range(n_drafts):
         pages[k] = np.concatenate(pages[k])        #glue the batches back into one pile
     return pages
+
+
+def pick_clips(n_clips, *, learn_clips, check_clips):
+    #a sample of the training clips to fit the probe on, and a sample of the
+    #held-out clips to score it on, the same 70 / 30 split as train py
+    learn_all, check_all = train.split_by_clip(n_clips, train_fraction=0.7)
+    if learn_clips > len(learn_all):
+        raise ValueError(f"asked for {learn_clips} learn clips, there are {len(learn_all)}")
+    if check_clips > len(check_all):
+        raise ValueError(f"asked for {check_clips} check clips, there are {len(check_all)}")
+    return learn_all[:learn_clips], check_all[:check_clips]
+
+
+def readability(checkpoint, learn_windows, learn_labels, check_windows, check_labels, *, physics, alpha):
+    #for one snapshot: how well each rule's push can be read off each draft
+    #fit on the learn pages, score on the check pages
+    learn_pages = read_drafts(checkpoint, learn_windows, physics=physics)
+    check_pages = read_drafts(checkpoint, check_windows, physics=physics)
+    scores = {}
+    for rule in RULES:
+        #(windows, birds, 2) -> one row per bird, the same order as the pages
+        learn_push = learn_labels[rule].reshape(-1, 2)
+        check_push = check_labels[rule].reshape(-1, 2)
+        scores[rule] = []
+        for k in range(len(learn_pages)):
+            fitted = fit_probe(learn_pages[k], learn_push, alpha=alpha)
+            scores[rule].append(probe_r2(fitted, check_pages[k], check_push))
+    return scores
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--checkpoint-dir", required=True)
+    parser.add_argument("--data", required=True)
+    parser.add_argument("--clips", type=int, required=True)
+    parser.add_argument("--learn-clips", type=int, default=50)
+    parser.add_argument("--check-clips", type=int, default=20)
+    #the untrained snapshot is the control: what random weights already show
+    parser.add_argument("--untrained-batch", type=int, default=None)
+    parser.add_argument("--trained-batch", type=int, default=None)
+    parser.add_argument("--alpha", type=float, default=1.0)
+    parser.add_argument("--out", default=None)
+    args = parser.parse_args(argv)
+
+    with open(Path(args.data) / "config.json") as config_file:
+        physics = json.load(config_file)["physics"]
+
+    batches = sorted(int(path.stem.split("_")[1]) for path in Path(args.checkpoint_dir).glob("step_*.pt"))
+
+    if not batches:
+        raise ValueError(f"no step_*.pt in {args.checkpoint_dir}, train with --log-checkpoints")
+    
+    untrained_batch = batches[0] if args.untrained_batch is None else args.untrained_batch
+    trained_batch = batches[-1] if args.trained_batch is None else args.trained_batch
+
+    #the windows are built at the context the snapshots were trained on
+    context = train.load_checkpoint(Path(args.checkpoint_dir) / f"step_{trained_batch:08d}.pt")["config"]["context"]
+    learn, check = pick_clips(args.clips, learn_clips=args.learn_clips, check_clips=args.check_clips)
+    learn_windows, _ = windows.build_windows(args.data, context=context, clips=learn)
+    check_windows, _ = windows.build_windows(args.data, context=context, clips=check)
+    learn_labels = windows.build_force_labels(args.data, context=context, clips=learn)
+    check_labels = windows.build_force_labels(args.data, context=context, clips=check)
+
+    result = {"untrained_batch": untrained_batch, "trained_batch": trained_batch,
+              "learn_clips": args.learn_clips, "check_clips": args.check_clips, "alpha": args.alpha}
+    
+    for name, batch in [("untrained", untrained_batch), ("trained", trained_batch)]:
+        checkpoint = train.load_checkpoint(Path(args.checkpoint_dir) / f"step_{batch:08d}.pt")
+
+        if checkpoint["config"]["context"] != context:
+            raise ValueError(f"batch {batch} has context {checkpoint['config']['context']}, the windows have {context}")
+        result[name] = readability(checkpoint, learn_windows, learn_labels, check_windows, check_labels,
+                                   physics=physics, alpha=args.alpha)
+    #the part training added, on top of what random weights already show
+    result["gain"] = {}
+    for rule in RULES:
+        result["gain"][rule] = [trained - untrained for trained, untrained
+                                in zip(result["trained"][rule], result["untrained"][rule])]
+
+    print(f"held-out R2 of the probe, batch {untrained_batch} (untrained) vs batch {trained_batch} (trained)")
+    for rule in RULES:
+        for k in range(len(result["gain"][rule])):
+            print(f"  {rule:10s} draft {k}   untrained {result['untrained'][rule][k]:+.3f}"
+                  f"   trained {result['trained'][rule][k]:+.3f}   gain {result['gain'][rule][k]:+.3f}")
+            
+    if args.out:
+        Path(args.out).write_text(json.dumps(result, indent=1))
+    return result
+
+
+if __name__ == "__main__":
+    main()
