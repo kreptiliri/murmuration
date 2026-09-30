@@ -279,3 +279,118 @@ def test_the_average_note_plugs_into_the_ablated_model(run):
         out = ablate.ablated_forward(ck["model"], moves, pair, block=1, note=average)
     assert out.shape == (40, 2 * N_BIRDS)
     assert torch.isfinite(out).all()
+
+
+# --- listening only to yourself -----------------------------------------------------------------
+
+def test_self_listening_is_one_note_per_bird():
+    model = small_model(2)
+    draft, pair = torch.randn(5, N_BIRDS, D_MODEL), torch.randn(5, N_BIRDS, N_BIRDS, 3)
+    with torch.no_grad():
+        heard = ablate.self_listening(model.blocks[0].attention, draft, pair)
+    assert heard.shape == (5, N_BIRDS, D_MODEL)
+
+
+def test_with_one_bird_self_listening_is_the_normal_listening():
+    """A bird alone has nobody else to hear, so the real attention already puts
+    all its weight on itself. The two have to agree exactly there."""
+    model = small_model(2)
+    draft, pair = torch.randn(5, 1, D_MODEL), torch.randn(5, 1, 1, 3)
+    attention = model.blocks[1].attention
+    with torch.no_grad():
+        torch.testing.assert_close(ablate.self_listening(attention, draft, pair), attention(draft, pair))
+
+
+def test_self_listening_does_not_hear_the_neighbours():
+    """Bird 0's note must not move when every other bird's draft changes and
+    every distance except its own (bird 0 to bird 0) changes."""
+    model = small_model(2)
+    draft, pair = torch.randn(5, N_BIRDS, D_MODEL), torch.randn(5, N_BIRDS, N_BIRDS, 3)
+    changed_draft = draft.clone()
+    changed_draft[:, 1:] = torch.randn_like(changed_draft[:, 1:])
+    changed_pair = torch.randn_like(pair)
+    changed_pair[:, 0, 0] = pair[:, 0, 0]
+    attention = model.blocks[0].attention
+    with torch.no_grad():
+        heard = ablate.self_listening(attention, draft, pair)
+        changed = ablate.self_listening(attention, changed_draft, changed_pair)
+    torch.testing.assert_close(heard[:, 0], changed[:, 0])
+
+
+def test_self_listening_still_hears_its_own_draft_and_its_own_place():
+    model = small_model(2)
+    draft, pair = torch.randn(5, N_BIRDS, D_MODEL), torch.randn(5, N_BIRDS, N_BIRDS, 3)
+    attention = model.blocks[0].attention
+    changed_draft = draft.clone()
+    changed_draft[:, 0] = torch.randn_like(changed_draft[:, 0])
+    changed_pair = pair.clone()
+    changed_pair[:, 0, 0] = torch.randn_like(changed_pair[:, 0, 0])
+    with torch.no_grad():
+        heard = ablate.self_listening(attention, draft, pair)
+        own_draft = ablate.self_listening(attention, changed_draft, pair)
+        own_place = ablate.self_listening(attention, draft, changed_pair)
+    assert not torch.allclose(heard[:, 0], own_draft[:, 0])
+    assert not torch.allclose(heard[:, 0], own_place[:, 0])
+
+
+def test_note_self_is_the_listening_line_with_only_yourself():
+    """Block 1 switched off with note="self": the listening line runs, but
+    each bird hears only itself, then the thinking line and the head as usual."""
+    model = small_model(2)
+    x, pair = fake_input(15)
+    block = model.blocks[1]
+    with torch.no_grad():
+        draft_1 = model.hidden_states(x, pair)[1]
+        heard = ablate.self_listening(block.attention, block.norm_one(draft_1), pair)
+        expected = answers_from(model, think_alone(block, draft_1 + heard), x)
+        out = ablate.ablated_forward(model, x, pair, block=1, note="self")
+    torch.testing.assert_close(out, expected)
+
+
+def test_with_the_only_block_on_self_a_bird_cannot_hear_its_neighbours():
+    model = small_model(1)
+    x, pair = fake_input(16)
+    changed_x = x.clone()
+    changed_x[:, :, 2:] = torch.randn_like(changed_x[:, :, 2:])
+    changed_pair = torch.randn_like(pair)
+    changed_pair[:, 0, 0] = pair[:, 0, 0]
+    with torch.no_grad():
+        out = ablate.ablated_forward(model, x, pair, block=0, note="self")
+        changed = ablate.ablated_forward(model, changed_x, changed_pair, block=0, note="self")
+    torch.testing.assert_close(out[:, :2], changed[:, :2])
+
+
+def test_note_self_is_not_the_blank_note():
+    model = small_model(2)
+    x, pair = fake_input(17)
+    with torch.no_grad():
+        own = ablate.ablated_forward(model, x, pair, block=1, note="self")
+        blank = ablate.ablated_forward(model, x, pair, block=1, note=torch.zeros(D_MODEL))
+    assert not torch.allclose(own, blank)
+
+
+def test_a_note_named_anything_else_is_refused():
+    model = small_model(2)
+    x, pair = fake_input(18)
+    with pytest.raises(ValueError):
+        ablate.ablated_forward(model, x, pair, block=1, note="average")
+
+
+def test_every_bird_hears_its_own_place_and_no_one_elses():
+    """Checked for every bird, not just bird 0: changing every distance except
+    the diagonal (each bird to itself) changes nobody's note, and changing
+    one bird's own place changes that bird's note."""
+    model = small_model(2)
+    draft, pair = torch.randn(5, N_BIRDS, D_MODEL), torch.randn(5, N_BIRDS, N_BIRDS, 3)
+    attention = model.blocks[0].attention
+    others_changed = torch.randn_like(pair)
+    for i in range(N_BIRDS):
+        others_changed[:, i, i] = pair[:, i, i]
+    with torch.no_grad():
+        heard = ablate.self_listening(attention, draft, pair)
+        torch.testing.assert_close(ablate.self_listening(attention, draft, others_changed), heard)
+        for b in range(N_BIRDS):
+            own_changed = pair.clone()
+            own_changed[:, b, b] = pair[:, b, b] + 1.0
+            moved = ablate.self_listening(attention, draft, own_changed)
+            assert not torch.allclose(moved[:, b], heard[:, b]), f"bird {b}"

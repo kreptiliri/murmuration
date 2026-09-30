@@ -214,7 +214,45 @@ def test_nothing_lost_is_zero_of_everything():
         assert fractions[rule] == pytest.approx(0.0, abs=1e-12), rule
 
 
-# --- ablation_report: every block, both notes -----------------------------------------------------
+# --- push_explained: how much of what was lost the three pushes account for ------------------------
+
+def test_push_explained_is_1_when_the_loss_is_only_pushes():
+    labels = fake_pushes(9)
+    lost = push(labels, {"separation": 0.3, "alignment": 0.8, "cohesion": 0.5}).reshape(4000, -1)
+    assert ablate.push_explained(lost, labels, dt=DT) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_push_explained_is_near_0_when_the_loss_has_nothing_to_do_with_the_pushes():
+    """The block 1 trap: a lot lost, none of it a rule. The fractions alone
+    would look small and calm, this number says they describe almost nothing."""
+    labels = fake_pushes(10)
+    lost = np.random.default_rng(11).normal(size=(4000, 2 * N_BIRDS))
+    assert ablate.push_explained(lost, labels, dt=DT) < 0.01
+
+
+def test_a_shift_that_is_no_push_is_not_explained():
+    """Every bird's answer moved by the same amount is damage the three pushes
+    cannot account for, so it counts against them, it is not averaged away."""
+    labels = fake_pushes(14)
+    lost = np.full((4000, 2 * N_BIRDS), 0.05)
+    assert ablate.push_explained(lost, labels, dt=DT) == pytest.approx(0.0, abs=0.01)
+
+
+def test_push_explained_counts_only_the_kept_birds():
+    labels = fake_pushes(12)
+    lost = push(labels, {"separation": 0.0, "alignment": 1.0, "cohesion": 0.0}).reshape(-1, 2).copy()
+    keep = np.ones(len(lost), dtype=bool)
+    keep[::4] = False
+    lost[~keep] = 50.0
+    assert ablate.push_explained(lost.reshape(4000, -1), labels, dt=DT, keep=keep) == pytest.approx(1.0, abs=1e-9)
+
+
+def test_push_explained_is_0_when_nothing_was_lost():
+    labels = fake_pushes(13)
+    assert ablate.push_explained(np.zeros((4000, 2 * N_BIRDS)), labels, dt=DT) == 0.0
+
+
+# --- ablation_report: every block, every note -----------------------------------------------------
 
 def report_for(run):
     data, _, ck = run
@@ -224,6 +262,8 @@ def report_for(run):
 
 
 def test_the_report_has_the_normal_score_and_a_row_per_block_and_note(run):
+    """Three ways to switch a block off: the average note, a blank one, and
+    each bird hearing only itself."""
     report = report_for(run)
     assert isinstance(report["normal"], float)
     assert 0 < report["kept"] <= 1
@@ -232,7 +272,9 @@ def test_the_report_has_the_normal_score_and_a_row_per_block_and_note(run):
         seen.append((row["block"], row["note"]))
         assert isinstance(row["score"], float)
         assert set(row["lost"]) == set(RULES)
-    assert sorted(seen) == [(0, "average"), (0, "zero"), (1, "average"), (1, "zero")]
+        assert isinstance(row["explained"], float) and row["explained"] <= 1.0
+    assert sorted(seen) == [(0, "average"), (0, "self"), (0, "zero"),
+                            (1, "average"), (1, "self"), (1, "zero")]
 
 
 def test_the_normal_score_is_the_normal_model_on_the_check_clips(run):
@@ -281,7 +323,7 @@ def test_main_scores_the_last_snapshot_and_saves_it(run, tmp_path, capsys):
     saved = json.loads(out.read_text())
     assert saved["batch"] == max(int(p.stem.split("_")[1]) for p in ckpts.glob("step_*.pt"))
     assert saved["learn_clips"] == 5 and saved["check_clips"] == 3
-    assert len(saved["rows"]) == 2 * N_BLOCKS
+    assert len(saved["rows"]) == 3 * N_BLOCKS
     assert saved["normal"] == pytest.approx(result["normal"])
     printed = capsys.readouterr().out
     for rule in RULES:
