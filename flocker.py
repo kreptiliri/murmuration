@@ -138,7 +138,7 @@ class RelAttention(torch.nn.Module): #Relative
         extra = self.pair_value(pair)
         extra = extra.view(batch, T, T, self.n_heads, self.d_head)
         #weights = batch, head, i ,j = bhij
-        #extra = batch, i, j, head, d_head
+        #extra = batch, i, j, head, d_head 
         # want = batch, head, i, d_head
         extra = torch.einsum("bhij,bijhd->bhid", weights, extra) #the coolest of them all, j in input but no output, so it gets summed (sigma over j)
         out = weights @ v + extra #value embeddings * embedding full line.  + extra info about positions
@@ -162,8 +162,8 @@ class RelBlock(torch.nn.Module):
     def forward(self, x, pair):
         #x + ... is the residual; the block starts as identity and tweaks from there
         #norms go BEFORE, not after
-        x = x + self.attention(self.norm_one(x), pair)
-        x = x + self.feedforward(self.norm_two(x))
+        x = x + self.attention(self.norm_one(x), pair) #listen: hear neighbours
+        x = x + self.feedforward(self.norm_two(x)) #think alone: each bird works out what it has, past draft stays, gets appended
         return x
 
 class Transformer(torch.nn.Module):
