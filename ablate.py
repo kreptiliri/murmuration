@@ -197,6 +197,37 @@ def ablation_report(checkpoint, learn_windows, check_windows, check_targets, che
     return {"normal": score(normal, check_targets), "kept": float(keep.mean()), "rows": rows}
 
 
+def self_ablation(checkpoint, check_windows, check_targets, check_labels, *, physics):
+    #one snapshot: how much of each push the model does at all, and how much of it
+    #goes away when one round hears only itself. no average note, so no learn clips needed
+    dt = physics["dt"]
+    keep = rules_explain(check_targets, check_labels, dt=dt)
+    normal = predict(checkpoint, check_windows, physics=physics)
+    blocks = []
+    for block in range(len(checkpoint["model"].blocks)):
+        ablated = predict(checkpoint, check_windows, physics=physics, block=block, note="self")
+        lost = normal - ablated
+        blocks.append({"block": block,
+                       "score": score(ablated, check_targets),
+                       "lost": push_lost(lost, check_labels, dt=dt, keep=keep),
+                       "explained": push_explained(lost, check_labels, dt=dt, keep=keep)})
+    #the same fit as push_lost, on the whole answer: 1 = the model does all of that rule
+    done = push_lost(normal, check_labels, dt=dt, keep=keep)
+    return {"normal": score(normal, check_targets), "done": done, "blocks": blocks}
+
+
+def ablation_curve(checkpoint_dir, check_windows, check_targets, check_labels, *, physics):
+    #self_ablation for every snapshot, in training order
+    rows = []
+    for path in probe.step_files(checkpoint_dir):
+        checkpoint = train.load_checkpoint(path)
+        row = self_ablation(checkpoint, check_windows, check_targets, check_labels, physics=physics)
+        row["batch"] = probe.batch_of(path)
+        row["pass"] = float(checkpoint["pass_number"])
+        rows.append(row)
+    return rows
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint-dir", required=True)
@@ -207,7 +238,11 @@ def main(argv=None):
     #which snapshot, the finished model by default
     parser.add_argument("--batch", type=int, default=None)
     parser.add_argument("--out", default=None)
+    #every snapshot, hearing only itself, for the curves
+    parser.add_argument("--sweep", action="store_true")
     args = parser.parse_args(argv)
+    if args.sweep and args.out is None:
+        parser.error("--sweep takes minutes, give it --out so the result is kept")
 
     with open(Path(args.data) / "config.json") as config_file:
         physics = json.load(config_file)["physics"]
@@ -223,9 +258,17 @@ def main(argv=None):
     context = checkpoint["config"]["context"]
 
     learn, check = probe.pick_clips(args.clips, learn_clips=args.learn_clips, check_clips=args.check_clips)
-    learn_windows, _ = windows.build_windows(args.data, context=context, clips=learn)
     check_windows, check_targets = windows.build_windows(args.data, context=context, clips=check)
     check_labels = windows.build_force_labels(args.data, context=context, clips=check)
+
+    if args.sweep:
+        curve = ablation_curve(args.checkpoint_dir, check_windows, check_targets, check_labels, physics=physics)
+        saved = {"curve": curve, "check_clips": args.check_clips}
+        Path(args.out).write_text(json.dumps(saved, indent=1))
+        print(f"{len(curve)} snapshots scored, saved to {args.out}")
+        return saved
+
+    learn_windows, _ = windows.build_windows(args.data, context=context, clips=learn)
 
     report = ablation_report(checkpoint, learn_windows, check_windows, check_targets, check_labels, physics=physics)
     result = {"batch": batch,
