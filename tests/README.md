@@ -1,6 +1,6 @@
 # The test suite
 
-723 tests, ~30 seconds. `pytest -q` from the repo root.
+737 tests, ~35 seconds. `pytest -q` from the repo root.
 
 These forces are the ground-truth labels for every probe and every ablation in
 this project. A silent error in them corrupts every downstream result and
@@ -58,6 +58,8 @@ holds:
 | | `test_plot_readability.py` | `plot_readability`: one panel per rule, one curve per draft, the untrained score dashed, the end of pass 1 marked, log or `--linear` x-axis | 11 |
 | `ablation/` | `test_ablate.py` | `ablated_forward()`, `average_listening()`, `self_listening()`: one block's listening replaced by a fixed note or by each bird hearing only itself, everything else untouched, the note averaged over the learn windows | 27 |
 | | `test_ablation_report.py` | `predict()`, `score()`, `rules_explain()`, `push_lost()`, `push_explained()`, `ablation_report()`, `main()`: answers in real units, how much of each rule's push a switched-off block takes away and how much of the damage that covers, every block with all three notes | 24 |
+| | `test_ablation_curve.py` | `self_ablation()`, `ablation_curve()`, `main --sweep`: every snapshot with each round hearing only itself, how much of each push the model does and how much each round carries | 7 |
+| | `test_plot_ablation.py` | `plot_ablation`: one panel per rule, what the model does and what each round carries, the probe's readability in the matching colour when given | 7 |
 | `tests/` | `test_imports_are_clean.py` | nothing tracked imports an untracked file, so a clone runs | 25 |
 
 `forces/` is the one to be most careful with. Those three files test the
