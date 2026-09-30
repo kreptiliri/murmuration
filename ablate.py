@@ -10,13 +10,29 @@ import train
 import windows
 
 RULES = ("separation", "alignment", "cohesion")
-NOTES = ("average", "zero")
+NOTES = ("average", "zero", "self")
+
+
+def self_listening(attention, x, pair):
+    #what the listening step writes when every bird hears only itself.
+    #all the attention on yourself means the weights are 1 on you and 0 on everyone else,
+    #so what comes back is your own v plus the "where" for your own place (distance 0)
+    batch, n_birds, d_model = x.shape
+    own_place = []
+    for i in range(n_birds):
+        own_place.append(pair[:, i, i])
+    own_place = torch.stack(own_place, dim=1) #(batch, birds, 3)
+    out = attention.v(x) + attention.pair_value(own_place)
+    return attention.proj(out)
 
 
 def ablated_forward(model, x, pair, *, block, note):
     #the model's forward, but block number "block" hears "note" instead of its neighbours
+    #note is a fixed note (128 numbers) or "self": every bird hears only itself
     if not (0 <= block < len(model.blocks)):
         raise ValueError(f"no block {block}, the model has {len(model.blocks)}")
+    if isinstance(note, str) and note != "self":
+        raise ValueError(f"note must be 128 numbers or 'self', got {note!r}")
     x = x[:, 1:]
     batch, T, n_features = x.shape
     n_birds = n_features // 2
@@ -27,7 +43,10 @@ def ablated_forward(model, x, pair, *, block, note):
     for k in range(len(model.blocks)):
         this_block = model.blocks[k]
         if k == block:
-            emb = emb + note
+            if isinstance(note, str):
+                emb = emb + self_listening(this_block.attention, this_block.norm_one(emb), pair)
+            else:
+                emb = emb + note
             emb = emb + this_block.feedforward(this_block.norm_two(emb))
         else: #normal listening round
             emb = this_block(emb, pair)
@@ -111,22 +130,27 @@ def rules_explain(targets, labels, *, dt, tol=1e-5):
     return miss.max(axis=1) < tol
 
 
-def push_lost(lost, labels, *, dt, keep=None):
-    #how much of each rule's push the switched off model stopped doing
-    #lost = a * separation + b * alignment + c * cohesion (each push times dt), fitted together
-    #so pushes that point against each other are told apart, 1 = all of it gone, 0 = untouched
-    #a fraction, so alignment being the biggest push does not drown the other two
+def pushes_and_lost(lost, labels, dt, keep):
+    #the three pushes (times dt) as three columns, and what was lost as one,
+    #x and y of every kept bird one after the other
     lost = np.asarray(lost, dtype=np.float64).reshape(-1, 2)
     if keep is None:
         keep = np.ones(len(lost), dtype=bool)
     columns = []
     for rule in RULES:
         rule_push = np.asarray(labels[rule], dtype=np.float64).reshape(-1, 2) * dt
-        #x and y of every kept bird, one after the other
         columns.append(rule_push[keep].reshape(-1))
-
     pushes = np.stack(columns, axis=1)
-    solution = np.linalg.lstsq(pushes, lost[keep].reshape(-1), rcond=None)
+    return pushes, lost[keep].reshape(-1)
+
+
+def push_lost(lost, labels, *, dt, keep=None):
+    #how much of each rule's push the switched off model stopped doing
+    #lost = a * separation + b * alignment + c * cohesion (each push times dt), fitted together
+    #so pushes that point against each other are told apart, 1 = all of it gone, 0 = untouched
+    #a fraction, so alignment being the biggest push does not drown the other two
+    pushes, lost = pushes_and_lost(lost, labels, dt, keep)
+    solution = np.linalg.lstsq(pushes, lost, rcond=None)
     fractions = solution[0]
     result = {}
     for r in range(len(RULES)):
@@ -134,8 +158,20 @@ def push_lost(lost, labels, *, dt, keep=None):
     return result
 
 
+def push_explained(lost, labels, *, dt, keep=None):
+    #how much of what was lost the three pushes account for: 1 = all of it, 0 = none.
+    #near 0 means the fractions from push_lost describe almost none of the damage
+    pushes, lost = pushes_and_lost(lost, labels, dt, keep)
+    total = (lost ** 2).sum()
+    if total == 0:
+        return 0.0 #nothing was lost, so there is nothing to explain
+    solution = np.linalg.lstsq(pushes, lost, rcond=None)
+    left_over = ((lost - pushes @ solution[0]) ** 2).sum()
+    return float(1 - left_over / total)
+
+
 def ablation_report(checkpoint, learn_windows, check_windows, check_targets, check_labels, *, physics):
-    #every block switched off in turn, with the average note and with a blank one
+    #every block switched off in turn: the average note, a blank one, and hearing only yourself
     #the average note comes from the learn clips, the damage is scored on the check clips
     dt = physics["dt"]
     normal = predict(checkpoint, check_windows, physics=physics)
@@ -145,7 +181,8 @@ def ablation_report(checkpoint, learn_windows, check_windows, check_targets, che
     rows = []
     for block in range(len(checkpoint["model"].blocks)):
         notes = {"average": average_listening(checkpoint, learn_windows, physics=physics, block=block),
-                 "zero": torch.zeros(d_model)}
+                 "zero": torch.zeros(d_model),
+                 "self": "self"}
         
         for name in NOTES:
             ablated = predict(checkpoint, check_windows, physics=physics, block=block, note=notes[name])
@@ -154,7 +191,8 @@ def ablation_report(checkpoint, learn_windows, check_windows, check_targets, che
             rows.append({"block": block,
                          "note": name,
                          "score": score(ablated, check_targets),
-                         "lost": push_lost(lost, check_labels, dt=dt, keep=keep)})
+                         "lost": push_lost(lost, check_labels, dt=dt, keep=keep),
+                         "explained": push_explained(lost, check_labels, dt=dt, keep=keep)})
 
     return {"normal": score(normal, check_targets), "kept": float(keep.mean()), "rows": rows}
 
@@ -200,11 +238,13 @@ def main(argv=None):
 
     print(f"batch {batch} (pass {result['pass']:.1f}), held-out score of the normal model {report['normal']:.4f}")
     print(f"push lost is fitted on the {report['kept']:.0%} of birds not held back by a speed limit")
-    print("1 = that push is gone, 0 = untouched")
+    print("push lost: 1 = that push is gone, 0 = untouched")
+    print("rules explain: how much of the damage those three numbers cover, trust them only when it is high")
     for row in report["rows"]:
         lost = row["lost"]
         print(f"  block {row['block']} off, {row['note']:7s} note   score {row['score']:+.4f}   push lost:"
-              f"  separation {lost['separation']:+.2f}  alignment {lost['alignment']:+.2f}  cohesion {lost['cohesion']:+.2f}")
+              f"  separation {lost['separation']:+.2f}  alignment {lost['alignment']:+.2f}  cohesion {lost['cohesion']:+.2f}"
+              f"   rules explain {row['explained']:.2f}")
 
     if args.out is not None:
         Path(args.out).write_text(json.dumps(result, indent=1))
