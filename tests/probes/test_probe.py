@@ -48,9 +48,6 @@ def test_a_push_written_in_a_straight_line_is_read_back_on_new_pages():
 
 
 def test_the_average_push_is_learned_too_not_only_the_multipliers():
-    """The pushes do not average to zero. Without a bias the probe has to fake
-    the offset with the multipliers and scores worse for a reason unrelated
-    to the model."""
     train_x, test_x = pages(500, 0), pages(500, 1)
     y_train = hidden_rule(train_x) + 100.0
     fitted = probe.fit_probe(train_x, y_train, alpha=1e-3)
@@ -58,8 +55,6 @@ def test_the_average_push_is_learned_too_not_only_the_multipliers():
 
 
 def test_a_push_that_is_not_there_scores_about_zero_on_new_pages():
-    """Noise can be fitted on the training pages, never on new ones. Scoring on
-    the pages it was fitted on would report this as a finding."""
     rng = np.random.default_rng(5)
     train_x, test_x = pages(300, 0), pages(300, 1)
     noise_train, noise_test = rng.normal(size=(300, 2)), rng.normal(size=(300, 2))
@@ -71,8 +66,6 @@ def test_a_push_that_is_not_there_scores_about_zero_on_new_pages():
 
 
 def test_a_box_with_the_same_number_on_every_page_does_not_break_it():
-    """A draft can have a box the model never uses, the same on every page.
-    Dividing by its spread is dividing by zero."""
     train_x, test_x = pages(300, 0), pages(300, 1)
     train_x[:, 3] = 7.0
     test_x[:, 3] = 7.0
@@ -82,8 +75,6 @@ def test_a_box_with_the_same_number_on_every_page_does_not_break_it():
 
 
 def test_the_size_of_a_box_does_not_decide_how_much_it_counts():
-    """One box in the thousands and the rest near 1: ridge would squash the
-    small ones harder. Every box is put on the same scale before fitting."""
     train_x, test_x = pages(500, 0), pages(500, 1)
     y_train, y_test = hidden_rule(train_x), hidden_rule(test_x)
     plain = probe.probe_r2(probe.fit_probe(train_x, y_train, alpha=1.0), test_x, y_test)
@@ -104,9 +95,6 @@ def test_a_bigger_penalty_means_smaller_multipliers():
 # --- the score -------------------------------------------------------------------------------
 
 def test_the_score_is_r2_over_both_numbers_against_their_own_average():
-    """1 - (the probe's squared miss) / (the squared miss of always guessing the
-    average of these targets), both numbers of the push pooled, the same R2
-    as train.py reports."""
     train_x, test_x = pages(200, 0), pages(100, 1)
     rng = np.random.default_rng(3)
     y_train = hidden_rule(train_x) + rng.normal(0, 3.0, (200, 2))
@@ -118,8 +106,6 @@ def test_the_score_is_r2_over_both_numbers_against_their_own_average():
 
 
 def test_an_enormous_penalty_just_guesses_the_average():
-    """Multipliers squashed to zero leave only the bias, the training average.
-    On the training pages that scores 0."""
     x = pages(300, 0)
     y = hidden_rule(x)
     fitted = probe.fit_probe(x, y, alpha=1e12)
@@ -129,15 +115,6 @@ def test_an_enormous_penalty_just_guesses_the_average():
 # --- precision ---------------------------------------------------------------------------------
 
 def test_a_fit_never_scores_below_zero_on_its_own_practice_pages():
-    """Guessing the average already scores 0 there, and the fit is the best
-    guess it can find, so it can only do as well or better.
-
-    Real drafts from an untrained network came in as float32 pages with
-    boxes that mostly repeat each other. Fitted in float32, the probe scored
-    -0.53 on its own practice pages and dragged every untrained control
-    below zero, which made the gains look bigger than 1. This makes the
-    same kind of pages: a few loud shared directions and the push hidden in
-    the faint ones."""
     rng = np.random.default_rng(0)
     n = 50000
     loud = rng.normal(size=(n, 3)) @ rng.normal(size=(3, 32)) * 100

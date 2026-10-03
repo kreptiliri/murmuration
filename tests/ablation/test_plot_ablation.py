@@ -65,8 +65,6 @@ def test_what_the_model_does_and_what_each_round_carries_are_drawn():
 
 
 def test_readability_is_drawn_when_given_in_the_colour_of_its_round():
-    """Draft 1 is what round 1 wrote, so readable-in-draft-1 and
-    lost-without-round-1 share a colour; the same for draft 2 and round 2."""
     fig = plot_ablation.plot_ablation(fake_curve(), readability=fake_readability())
     read = fake_readability()["curve"]
     rows = [row for row in read if row["batch"] > 0]

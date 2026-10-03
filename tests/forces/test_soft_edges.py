@@ -18,8 +18,6 @@ RULES = tuple(RADII)
 
 
 def force(rule, positions, velocities, softness=None, boid_id=0):
-    """One rule for one bird. softness=None calls without the argument, so the
-    default itself is what gets tested."""
     kw = {} if softness is None else {"softness": softness}
     if rule == "separation":
         return calculate_separation(boid_id, positions, SEPARATION_RADIUS, BOUNDS, 1.0, **kw)
@@ -29,15 +27,12 @@ def force(rule, positions, velocities, softness=None, boid_id=0):
 
 
 def pair(distance, angle=0.3):
-    """Bird 0 mid-world, one neighbour `distance` away, velocities that differ,
-    so every rule has something to say about the neighbour."""
     here = np.array([50.0, 50.0])
     there = here + distance * np.array([np.cos(angle), np.sin(angle)])
     return np.array([here, there]), np.array([[1.0, 0.2], [-0.4, 1.3]])
 
 
 def fading(rule, share):
-    """A distance inside `rule`'s fade zone whose weight is `share`."""
     r = RADII[rule]
     return r - share * SOFT * r
 
@@ -64,7 +59,6 @@ def test_the_fade_is_a_straight_line(radius):
 
 
 def test_softness_zero_is_the_hard_edge():
-    """sim-v1's world: in or out, nothing between."""
     assert edge_weight(19.999999, 20.0, 0.0) == 1.0
     assert edge_weight(20.0, 20.0, 0.0) == 0.0
     assert edge_weight(0.0, 20.0, 0.0) == 1.0
@@ -89,8 +83,6 @@ def test_the_weight_never_grows_with_distance_and_stays_in_zero_to_one(softness)
 @pytest.mark.parametrize("rule", RULES)
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_the_default_is_the_hard_edge(rule, seed):
-    """Every force test written before this suite calls the rules without a
-    softness. They must keep meaning what they meant."""
     positions, velocities = random_flock(seed=seed, n_birds=12)
     for i in range(12):
         np.testing.assert_array_equal(force(rule, positions, velocities, boid_id=i),
@@ -107,10 +99,6 @@ def test_a_lone_neighbour_before_the_fade_is_untouched(rule):
 @pytest.mark.parametrize("rule", RULES)
 @pytest.mark.parametrize("share", [0.2, 0.5, 0.9])
 def test_a_lone_fading_neighbour_pushes_in_proportion_to_its_weight(rule, share):
-    """The average is divided by the summed weight but never by less than 1.
-    Divided by the weight alone, a lone neighbour would push at full strength
-    right up to the radius and then vanish - the very jump soft edges exist to
-    remove. For alignment this means share * (v_j - v_i), not v_j - v_i."""
     positions, velocities = pair(fading(rule, share))
     hard = force(rule, positions, velocities, 0.0)
     assert np.linalg.norm(hard) > 1e-3, "premise: the hard rule must push here"
@@ -120,8 +108,6 @@ def test_a_lone_fading_neighbour_pushes_in_proportion_to_its_weight(rule, share)
 
 @pytest.mark.parametrize("rule", RULES)
 def test_two_neighbours_average_by_weight(rule):
-    """One neighbour before the fade (weight 1), one halfway through it
-    (weight 0.5): a weighted mean over a summed weight of 1.5."""
     r = RADII[rule]
     here = np.array([50.0, 50.0])
     a = here + 0.5 * r * np.array([1.0, 0.0])
@@ -146,10 +132,6 @@ def test_two_neighbours_average_by_weight(rule):
 
 @pytest.mark.parametrize("rule", RULES)
 def test_a_neighbour_leaving_the_radius_fades_to_nothing(rule):
-    """The point of the whole change. A neighbour just inside the radius adds
-    almost nothing, so crossing it moves the force by almost nothing. The hard
-    edge is shown jumping in the same place, so this test cannot pass for a
-    world where nothing was near the edge anyway."""
     r = RADII[rule]
     here = np.array([50.0, 50.0])
     inside_plateau = here + 0.4 * r * np.array([1.0, 0.0])
@@ -170,8 +152,6 @@ def test_a_neighbour_leaving_the_radius_fades_to_nothing(rule):
 
 @pytest.mark.parametrize("rule", RULES)
 def test_a_lone_neighbour_leaving_the_radius_fades_too(rule):
-    """The last neighbour leaving is where dividing by the weight alone would
-    still jump."""
     positions, velocities = pair(RADII[rule] * (1 - 1e-6))
     hard = np.linalg.norm(force(rule, positions, velocities, 0.0))
     assert hard > 1e-3
@@ -191,8 +171,6 @@ def test_a_bird_beyond_the_radius_changes_nothing(rule):
 
 
 def test_each_rule_fades_at_its_own_radius():
-    """28 units away: past separation's radius (20), in alignment's fade
-    (22.5-30, weight 2/7.5) and before cohesion's (30-40, weight 1)."""
     positions, velocities = pair(28.0)
     assert np.all(force("separation", positions, velocities, SOFT) == 0.0)
     np.testing.assert_allclose(force("alignment", positions, velocities, SOFT),
@@ -202,7 +180,6 @@ def test_each_rule_fades_at_its_own_radius():
 
 
 def test_the_weight_is_measured_around_the_seam():
-    """35 units apart across the seam (65 the long way): cohesion weight 0.5."""
     positions = np.array([[2.0, 50.0], [67.0, 50.0]])
     velocities = np.zeros((2, 2))
     hard = force("cohesion", positions, velocities, 0.0)

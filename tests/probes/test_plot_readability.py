@@ -51,8 +51,6 @@ def test_one_curve_and_one_dashed_untrained_line_per_draft_in_each_panel():
 # --- the lines are the right numbers --------------------------------------------------------
 
 def test_each_curve_is_that_rule_and_draft_over_training():
-    """Log scale by default, so batch 0 cannot sit on the axis: the curve starts
-    at batch 1 and batch 0 is the dashed line."""
     data = fake_curve()
     fig = plot_readability.plot_readability(data)
     for ax, rule in zip(fig.get_axes(), RULES):
@@ -64,8 +62,6 @@ def test_each_curve_is_that_rule_and_draft_over_training():
 
 
 def test_the_dashed_line_is_the_untrained_score():
-    """The free part: what a random network already shows. The gap between the
-    curve and this line is what training added."""
     data = fake_curve()
     untrained = data["curve"][0]
     assert untrained["batch"] == 0
@@ -124,9 +120,6 @@ def dotted_lines(ax):
 
 
 def test_the_end_of_pass_1_is_marked_in_every_panel():
-    """Batches alone do not say how far into training a point is. 1365 batches
-    is one pass over the data at batch 256; the line is put where the curve
-    itself says a pass ends (batch / pass), not at a number typed in here."""
     data = fake_curve()
     per_pass = data["curve"][-1]["batch"] / data["curve"][-1]["pass"]
     fig = plot_readability.plot_readability(data)

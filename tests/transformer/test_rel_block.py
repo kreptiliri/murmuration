@@ -36,7 +36,6 @@ def test_it_comes_back_the_same_shape(block, x, pair):
 
 
 def test_it_is_your_block_with_the_attention_swapped(block):
-    """Same four parts as flocker.Block. Only the attention is new."""
     assert isinstance(block.norm_one, torch.nn.LayerNorm)
     assert isinstance(block.attention, flocker.RelAttention)
     assert isinstance(block.norm_two, torch.nn.LayerNorm)
@@ -44,15 +43,12 @@ def test_it_is_your_block_with_the_attention_swapped(block):
 
 
 def test_it_matches_pre_norm_residual_written_out(block, x, pair):
-    """x + attention(norm(x), pair), then + feedforward(norm(...)). Catches
-    norms placed after, a residual dropped, and the pair not reaching attention."""
     h = x + block.attention(block.norm_one(x), pair)
     expected = h + block.feedforward(block.norm_two(h))
     torch.testing.assert_close(block(x, pair), expected, atol=1e-6, rtol=1e-6)
 
 
 def test_the_residual_is_real(block, x, pair):
-    """Silence both sublayers and the block must hand back its input untouched."""
     with torch.no_grad():
         block.attention.proj.weight.zero_()
         block.feedforward.narrow.weight.zero_()

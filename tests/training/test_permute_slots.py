@@ -23,7 +23,6 @@ def batch():
 
 
 def as_birds(flat):
-    """(..., 24) -> (..., 12, 2). The view every check below is written in."""
     return flat.reshape(*flat.shape[:-1], N_SLOTS, 2)
 
 
@@ -40,7 +39,6 @@ def test_the_shapes_come_back_unchanged(batch):
 
 
 def test_the_inputs_are_not_modified_in_place(batch):
-    """The caller keeps the unpermuted arrays and reuses them every epoch."""
     windows, targets = batch
     before_w, before_t = windows.copy(), targets.copy()
 
@@ -53,7 +51,6 @@ def test_the_inputs_are_not_modified_in_place(batch):
 # --- trap 3: it is a permutation of birds, not of numbers ---------------------
 
 def test_every_bird_survives_somewhere(batch):
-    """Each row's 12 (x, y) pairs come back as the same 12 pairs, reordered."""
     windows, _ = batch
     out_w, _ = train.permute_slots(windows, _dummy(windows),
                                    np.random.default_rng(2))
@@ -68,7 +65,6 @@ def test_every_bird_survives_somewhere(batch):
 
 
 def test_the_x_and_y_of_a_bird_stay_together(batch):
-    """Splitting a pair destroys every distance and raises nothing."""
     windows, _ = batch
     out_w, _ = train.permute_slots(windows, _dummy(windows),
                                    np.random.default_rng(3))
@@ -81,13 +77,6 @@ def test_the_x_and_y_of_a_bird_stay_together(batch):
 
 
 def test_every_bird_to_bird_distance_is_preserved(batch):
-    """The property the whole project rests on.
-
-    Measured 2026-09-15: per-bird anchoring scored 3x better and collapsed the
-    bird-0-to-bird-1 spread from 26.89 to 0.00, deleting the raw material of all
-    three rules while the loss improved. A permutation must not do that: the
-    multiset of pairwise distances is exactly what has to survive.
-    """
     windows, _ = batch
     out_w, _ = train.permute_slots(windows, _dummy(windows),
                                    np.random.default_rng(4))
@@ -101,12 +90,6 @@ def test_every_bird_to_bird_distance_is_preserved(batch):
 # --- traps 1 and 2: the target follows, and follows the SAME draw -------------
 
 def test_the_target_gets_the_same_permutation_as_the_window(batch):
-    """The one that makes the labels wrong for eleven birds out of twelve.
-
-    Recovers the permutation from the window by matching birds, then demands the
-    target was moved by that same permutation. This is the check that a
-    correctly-shaped, correctly-shuffled, separately-drawn target fails.
-    """
     windows, targets = batch
     out_w, out_t = train.permute_slots(windows, targets,
                                        np.random.default_rng(5))
@@ -121,7 +104,6 @@ def test_the_target_gets_the_same_permutation_as_the_window(batch):
 
 
 def test_the_same_permutation_is_used_at_every_tick_of_a_window(batch):
-    """A per-tick draw would make each bird a different bird from tick to tick."""
     windows, targets = batch
     out_w, _ = train.permute_slots(windows, targets, np.random.default_rng(6))
 
@@ -139,7 +121,6 @@ def test_the_same_permutation_is_used_at_every_tick_of_a_window(batch):
 # --- it actually permutes, and differently per row ----------------------------
 
 def test_it_does_something(batch):
-    """Guards every test above: the identity permutation passes all of them."""
     windows, targets = batch
 
     out_w, _ = train.permute_slots(windows, targets, np.random.default_rng(7))
@@ -149,8 +130,6 @@ def test_it_does_something(batch):
 
 
 def test_rows_get_independent_draws(batch):
-    """One permutation for the whole batch is weaker, not wrong - but if that is
-    the intent it should be a decision in the docstring, not an accident."""
     windows, targets = batch
 
     out_w, _ = train.permute_slots(windows, targets, np.random.default_rng(8))
@@ -184,7 +163,6 @@ def test_two_calls_with_different_seeds_differ(batch):
 
 
 def test_consecutive_calls_on_one_generator_differ(batch):
-    """It is called once per batch off one generator, not once per epoch."""
     windows, targets = batch
     rng = np.random.default_rng(12)
 
@@ -197,12 +175,6 @@ def test_consecutive_calls_on_one_generator_differ(batch):
 # --- it composes with what comes after it ------------------------------------
 
 def test_the_copier_baseline_permutes_with_the_window(batch):
-    """The copier is a second difference per bird, so it must follow too.
-
-    If the training target is ever changed to `truth - copier_baseline(x)`, the
-    copier has to be computed from the *permuted* window or the residual is
-    misaligned by a permutation - the same failure as permuting a window without its target, one level down.
-    """
     windows, targets = batch
     out_w, _ = train.permute_slots(windows, targets, np.random.default_rng(13))
 
@@ -217,11 +189,6 @@ def test_the_copier_baseline_permutes_with_the_window(batch):
 
 
 def test_to_moves_commutes_with_it(batch):
-    """Permuting then differencing equals differencing then permuting.
-
-    This is what makes the ordering in the training loop a free choice for
-    `to_moves` and *not* a free choice for `apply_squash`.
-    """
     windows, targets = batch
     out_w, _ = train.permute_slots(windows, targets, np.random.default_rng(14))
 
@@ -239,23 +206,15 @@ def test_to_moves_commutes_with_it(batch):
 # --- helpers ------------------------------------------------------------------
 
 def _dummy(windows):
-    """A target array shaped for `windows`, when the test only reads the input."""
     return np.zeros((len(windows), N_FEATURES))
 
 
 def _pairwise(birds):
-    """Every bird-to-bird distance in one tick. No torus: these are raw windows,
-    already unwrapped per bird by `build_windows`."""
     offsets = birds[:, None, :] - birds[None, :, :]
     return np.linalg.norm(offsets, axis=-1)[np.triu_indices(N_SLOTS, k=1)]
 
 
 def _recover_permutation(before, after):
-    """`order` such that `before[order] == after`, by exact coordinate match.
-
-    The fixture draws from a continuous distribution, so no two birds share a
-    position and the match is unambiguous.
-    """
     order = np.empty(N_SLOTS, dtype=int)
     for i, bird in enumerate(after):
         matches = np.flatnonzero((before == bird).all(axis=1))

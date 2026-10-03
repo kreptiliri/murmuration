@@ -22,7 +22,6 @@ N_BIRDS = 6
 # --- fake models, so every expected answer is known exactly -------------------------
 
 class Constant(torch.nn.Module):
-    """Always predicts the same change for every bird."""
     def __init__(self, change):
         super().__init__()
         self.change = change
@@ -33,7 +32,6 @@ class Constant(torch.nn.Module):
 
 
 class Recorder(Constant):
-    """Predicts zero, and keeps what it was handed."""
     def __init__(self):
         super().__init__(0.0)
         self.inputs, self.pairs = [], []
@@ -45,9 +43,6 @@ class Recorder(Constant):
 
 
 class Simulator(torch.nn.Module):
-    """The perfect model: reads the window back into positions and a velocity,
-    runs boids.step, and answers with the change step made. Only works with
-    identity scalers and a model kind that sees the first tick (not rel)."""
     def __init__(self, physics):
         super().__init__()
         self.physics = physics
@@ -97,7 +92,6 @@ def test_it_does_not_change_the_start_it_is_handed():
 
 
 def test_every_bird_stays_inside_the_box():
-    """The page draws positions straight onto a 100 x 100 canvas."""
     start = real_start()[:2]
     out = rollout.rollout(checkpoint(Constant(0.7)), start, n_ticks=60, physics=PHYSICS)
     assert (out >= 0).all() and (out < BOUNDS).all()
@@ -119,7 +113,6 @@ def test_the_same_call_gives_the_same_flight():
 # --- it flies the way the simulator moves birds ---------------------------------------
 
 def test_predicting_no_change_flies_straight_on():
-    """Zero change keeps the last velocity, so each tick adds the last move again."""
     start = real_start()[:2]
     out = rollout.rollout(checkpoint(Constant(0.0)), start, n_ticks=10, physics=PHYSICS)
     move = boids.get_torus(start[1], start[0], BOUNDS)
@@ -129,8 +122,6 @@ def test_predicting_no_change_flies_straight_on():
 
 
 def test_a_constant_change_speeds_up_by_that_much_every_tick():
-    """The model's answer is a change of velocity, not a position or a velocity.
-    Each tick the velocity grows by the change, so each move grows by change * dt."""
     start = real_start()[:2]
     out = rollout.rollout(checkpoint(Constant(0.5)), start, n_ticks=6, physics=PHYSICS)
     moves = boids.get_torus(out[1:], out[:-1], BOUNDS)
@@ -139,10 +130,6 @@ def test_a_constant_change_speeds_up_by_that_much_every_tick():
 
 
 def test_the_perfect_model_reproduces_the_simulator():
-    """The whole contract in one test. A model that answers exactly what boids.step
-    would do has to retrace the real clip. If this drifts, the rollout moves birds
-    in a way the simulator never did, and every frame of the slider is wrong
-    while still looking like birds."""
     clip = real_start(n_ticks=40)
     out = rollout.rollout(checkpoint(Simulator(PHYSICS_CRUISING)), clip[:2], n_ticks=30,
                           physics=PHYSICS)
@@ -151,8 +138,6 @@ def test_the_perfect_model_reproduces_the_simulator():
 
 
 def test_the_birds_cross_the_seam_without_jumping():
-    """A bird at x = 99.8 moving right reaches 0.3 next tick. Read naively, that
-    move is -99.5, and the model is handed a bird teleporting across the world."""
     start = np.full((2, N_BIRDS, 2), 50.0)
     start[0, 0] = [99.4, 50.0]
     start[1, 0] = [99.8, 50.0]
@@ -166,8 +151,6 @@ def test_the_birds_cross_the_seam_without_jumping():
 # --- it talks to the model the way training did -----------------------------------------
 
 def test_the_model_gets_the_window_squashed_with_the_checkpoints_own_scaler():
-    """Training fed the model moves divided by the x scaler. Raw positions go in
-    without raising and every prediction is nonsense."""
     start = real_start()[:2]
     model = Recorder()
     rollout.rollout(checkpoint(model, x_std=4.0), start, n_ticks=1, physics=PHYSICS)
@@ -177,8 +160,6 @@ def test_the_model_gets_the_window_squashed_with_the_checkpoints_own_scaler():
 
 
 def test_the_answer_is_unsquashed_with_the_checkpoints_own_scaler():
-    """A model answering 0 in squashed units means 'the average change', which is
-    the y scaler's mean, not zero."""
     start = real_start()[:2]
     moved = rollout.rollout(checkpoint(Constant(0.0), y_mean=0.5, y_std=3.0), start,
                             n_ticks=3, physics=PHYSICS)
@@ -205,8 +186,6 @@ def test_other_models_get_no_pair_geometry():
 
 
 def test_the_model_sees_its_own_flight_not_the_real_one():
-    """After the start, the only thing a rollout has is what the model did. Feeding
-    it real ticks would make every snapshot fly perfectly and the slider pointless."""
     start = real_start()[:2]
     model = Recorder()
     out = rollout.rollout(checkpoint(model), start, n_ticks=4, physics=PHYSICS)

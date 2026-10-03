@@ -9,7 +9,6 @@ RULES = ("separation", "alignment", "cohesion")
 
 
 def a_flock(seed, *, n=12, physics=PHYSICS):
-    """Legal initial conditions: heading uniform, speed inside the clamp."""
     rng = np.random.default_rng(seed)
     positions = rng.uniform(0.0, physics.bounds, size=(n, 2))
     heading = rng.uniform(0.0, 2 * np.pi, size=n)
@@ -36,7 +35,6 @@ def test_relabelling_the_birds_permutes_the_answer_and_changes_nothing_else(seed
 
 
 def test_the_permutation_test_can_fail():
-    """Guards the test above: a permutation that does nothing proves nothing."""
     positions, velocities = a_flock(0)
     order = np.roll(np.arange(len(positions)), 1)
 
@@ -71,10 +69,6 @@ def test_sliding_the_whole_flock_leaves_the_forces_alone(seed):
 
 
 def test_sliding_a_flock_across_the_seam_still_leaves_it_alone():
-    """The case that would catch a raw coordinate used where a difference belongs.
-
-    Put the flock tight against x = 0 and slide it left, so every bird wraps.
-    """
     positions = np.array([[0.5, 50.0], [1.5, 50.0], [2.5, 51.0], [1.0, 49.0]])
     velocities = np.array([[2.0, 0.0], [-2.0, 0.5], [0.0, 2.0], [1.4, -1.4]])
 
@@ -91,11 +85,6 @@ def test_sliding_a_flock_across_the_seam_still_leaves_it_alone():
 # --- 3. the eight symmetries of a square ---------------------------------------
 
 def square_maps(bounds):
-    """The dihedral group of the square torus, as (name, function) pairs.
-
-    Each maps [0, bounds)^2 onto itself and is linear on differences, which is
-    what lets it commute with the per-axis minimum image.
-    """
     def wrap(p):
         return p % bounds
 
@@ -112,7 +101,6 @@ def square_maps(bounds):
 
 
 def linear_part(name):
-    """The same map without the wrap - what a velocity or a force gets."""
     return {
         "identity":       lambda v: v.copy(),
         "rotate 90":      lambda v: np.stack([-v[..., 1], v[..., 0]], -1),
@@ -147,13 +135,6 @@ def test_the_square_symmetries_carry_the_forces_with_them(name, seed):
 
 
 def test_an_arbitrary_rotation_is_not_a_symmetry():
-    """The limit of the group above, asserted so nobody augments past it.
-
-    A 30-degree rotation is a symmetry of the *rules* - they only read distances
-    - and not of the *world*, because the minimum-image region is a square. Birds
-    near the seam change who their neighbours are. The difference is small, which
-    is exactly why it needs a test rather than a comment.
-    """
     bounds = PHYSICS.bounds
     angle = np.deg2rad(30.0)
     rotate = np.array([[np.cos(angle), -np.sin(angle)],

@@ -51,8 +51,6 @@ def test_one_snapshot_has_the_normal_score_what_the_model_does_and_a_row_per_blo
 
 
 def test_done_is_how_much_of_each_push_the_normal_answer_holds(run):
-    """The same fit as push_lost, on the model's whole answer instead of on what
-    was lost: 1 = the model does all of that rule, 0 = none of it."""
     _, ckpts, x, y, labels = run
     ck = train.load_checkpoint(max(ckpts.glob("step_*.pt")))
     keep = ablate.rules_explain(y, labels, dt=DT)

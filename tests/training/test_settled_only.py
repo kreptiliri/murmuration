@@ -65,7 +65,6 @@ def row_counter(monkeypatch, name):
 # --- off by default --------------------------------------------------------------
 
 def test_without_the_flag_every_window_is_used(dataset, monkeypatch, capsys):
-    """Every score recorded so far was trained on all windows."""
     seen = row_counter(monkeypatch, "shared_squasher")
 
     train.main(flags(dataset))
@@ -80,9 +79,6 @@ def test_without_the_flag_every_window_is_used(dataset, monkeypatch, capsys):
                                            ("linear", "squasher")])
 def test_the_scalers_are_fitted_on_settled_learn_windows_only(dataset, monkeypatch,
                                                               capsys, model, scaler):
-    """Fitted on every window, the target scaler describes the big turns before
-    settling, squashes every settled change to almost nothing, and the loss
-    stops caring about them again - the thing this flag exists to undo."""
     seen = row_counter(monkeypatch, scaler)
 
     train.main(flags(dataset, "--settled-only", model=model))
@@ -95,8 +91,6 @@ def test_the_scalers_are_fitted_on_settled_learn_windows_only(dataset, monkeypat
 
 @pytest.mark.parametrize("residual", ["none", "clamped"])
 def test_the_saved_scalers_are_the_settled_ones(dataset, tmp_path, residual):
-    """Checked through the checkpoint, the file the probes will load. With a
-    baseline, it has to come off the same settled rows as the target."""
     x, y = windows.build_windows(dataset, context=CONTEXT, clips=range(4))
     keep = settled_by_hand(range(4))
     x, y = x[keep], y[keep]
@@ -121,8 +115,6 @@ def test_the_saved_scalers_are_the_settled_ones(dataset, tmp_path, residual):
 
 
 def test_training_and_scoring_see_only_settled_windows(dataset, monkeypatch):
-    """Everything that goes through the scaler: the held-out set once for the
-    input and once for the target, then every training batch twice."""
     seen = []
     real = train.apply_squash
     monkeypatch.setattr(train, "apply_squash",
@@ -136,8 +128,6 @@ def test_training_and_scoring_see_only_settled_windows(dataset, monkeypatch):
 
 
 def test_the_printed_score_is_over_settled_held_out_windows(dataset, monkeypatch):
-    """Otherwise the R2 it prints cannot be set against the -0.13 the old model
-    scores on settled windows."""
     seen = []
     real = train.cancel_squash
     monkeypatch.setattr(train, "cancel_squash",
@@ -153,7 +143,6 @@ def test_the_printed_score_is_over_settled_held_out_windows(dataset, monkeypatch
 @pytest.mark.parametrize("settle, where", [([-1, -1, -1, -1, 0, 0], "learn"),
                                           ([0, 0, 0, 0, -1, -1], "held-out")])
 def test_no_settled_window_is_refused(tmp_path_factory, settle, where):
-    """Zero rows gives a scaler of NaNs or an R2 of NaN, printed like a result."""
     empty = make_dataset(tmp_path_factory, f"none_settled_{where}", settle)
 
     with pytest.raises(ValueError, match="settled"):

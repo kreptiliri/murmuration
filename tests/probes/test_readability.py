@@ -50,8 +50,6 @@ def test_the_two_samples_never_share_a_clip():
 
 
 def test_the_learn_sample_comes_from_the_training_clips_and_the_check_sample_from_the_held_out_ones():
-    """The same 70 / 30 split as train.py. Scoring the probe on clips the model
-    trained on would let memorised flights pass for understanding."""
     learn_all, check_all = train.split_by_clip(1000, train_fraction=0.7)
     learn, check = probe.pick_clips(1000, learn_clips=50, check_clips=20)
     assert set(learn) <= set(learn_all)
@@ -79,9 +77,6 @@ def test_a_score_for_every_rule_and_every_draft(run):
 
 
 def test_each_score_is_the_probe_fitted_on_learn_and_scored_on_check(run):
-    """Spelled out by hand for one rule and one draft: fit on the learn clips'
-    pages, score on the check clips' pages. Fitting and scoring on the same
-    pages always looks better, and nothing would raise."""
     data, ckpts = run
     ck = last_snapshot(ckpts)
     (x_l, lab_l), (x_c, lab_c) = windows_and_labels(data, range(0, 7)), windows_and_labels(data, range(7, 10))
@@ -96,9 +91,6 @@ def test_each_score_is_the_probe_fitted_on_learn_and_scored_on_check(run):
 
 
 def test_each_birds_label_meets_that_birds_page(run):
-    """Swap the real pushes for each bird's own move, which draft 0 holds in a
-    straight line. Draft 0 then has to score about 1. If labels and pages were
-    paired to the wrong birds or windows, it could not."""
     data, ckpts = run
     x_l, _ = windows_and_labels(data, range(0, 7))
     x_c, _ = windows_and_labels(data, range(7, 10))
@@ -128,7 +120,6 @@ def test_main_compares_the_untrained_and_the_finished_model_by_default(run):
 
 
 def test_the_gain_is_trained_minus_untrained(run):
-    """The number that matters. What a random network already shows is free."""
     data, ckpts = run
     result = probe.main(args(data, ckpts))
     for rule in RULES:

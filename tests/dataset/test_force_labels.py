@@ -35,7 +35,6 @@ def test_one_array_per_rule(dataset):
 
 
 def test_one_row_per_window_the_same_count_as_build_windows(dataset):
-    """Label i has to belong to window i. A different count means they cannot."""
     for context in (2, 5):
         x, _ = windows.build_windows(dataset, context=context)
         labels = windows.build_force_labels(dataset, context=context)
@@ -53,16 +52,6 @@ def test_no_missing_values(dataset):
 
 @pytest.mark.parametrize("context", [2, 3, 5])
 def test_the_three_pushes_add_up_to_the_target(dataset, context):
-    """The window ends at tick T and its target is v(T+1) - v(T). The simulator
-    made that change from the three pushes it recorded while stepping T -> T+1,
-    times dt. So the labels, added up, must give back the target exactly.
-
-    Take the pushes one tick early or late and they still look right: pushes
-    change slowly, the probes still score, and every curve is quietly off.
-    This is the only test that can tell.
-
-    A bird that hit the speed limit had its velocity trimmed after the pushes,
-    so those birds are left out."""
     _, targets = windows.build_windows(dataset, context=context)
     labels = windows.build_force_labels(dataset, context=context)
     targets = targets.reshape(len(targets), N_BIRDS, 2)
@@ -83,8 +72,6 @@ def test_the_three_pushes_add_up_to_the_target(dataset, context):
 
 
 def test_window_zero_of_each_clip_reads_the_push_at_its_last_tick(dataset):
-    """Spelled out on one window, so the rule is readable: context 4 means ticks
-    0 to 3 go in, and the pushes recorded at index 3 (the step 3 -> 4) come out."""
     forces, _ = recorded(dataset)
     labels = windows.build_force_labels(dataset, context=4)
     n_windows_clip = forces["separation"].shape[1] + 1 - 4

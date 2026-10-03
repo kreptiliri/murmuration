@@ -33,8 +33,6 @@ def test_per_bird_builds_the_one_in_flocker():
 
 
 def test_the_flag_reaches_build_model(tiny_dataset, monkeypatch):
-    """A dropped flag is invisible: the run finishes and prints a score, and the
-    linear model trained under the per-bird name."""
     asked = []
     real = train.build_model
     monkeypatch.setattr(train, "build_model",
@@ -46,15 +44,11 @@ def test_the_flag_reaches_build_model(tiny_dataset, monkeypatch):
 
 
 def test_main_trains_it_end_to_end_at_context_2(tiny_dataset, capsys):
-    """The configuration it exists for, from one command."""
     assert train.main(flags(tiny_dataset)) == 0
     assert "R2 model" in capsys.readouterr().out
 
 
 def test_its_checkpoint_loads_back_as_the_same_model(tiny_dataset, tmp_path):
-    """load_checkpoint rebuilds from the saved config. If that config cannot
-    describe a per-bird model, every checkpoint of the real run is unreadable,
-    and the probes in step 5 read checkpoints, not live models."""
     train.main(flags(tiny_dataset, "--checkpoint-every", "1",
                      "--checkpoint-dir", str(tmp_path)))
 

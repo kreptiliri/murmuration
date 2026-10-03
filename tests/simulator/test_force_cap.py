@@ -20,9 +20,6 @@ CAP = 0.3
 # --- the constants ---------------------------------------------------------------------
 
 def test_the_shipped_softness_and_cap():
-    """The pair measured to balance the rules: with them separation and
-    cohesion carry about 12% and 10% of the forming-phase motion, against 2%
-    each without, and about half of all flocks still settle within 300 ticks."""
     shipped = Physics()
     assert shipped.edge_softness == 0.25
     assert shipped.max_force == 0.3
@@ -73,8 +70,6 @@ def test_shrinking_keeps_the_direction():
 
 
 def test_the_cap_limits_the_length_not_each_axis():
-    """Each axis is under the cap, the length is not. Clipping axes separately
-    would let a diagonal push through at up to 1.41 times the cap."""
     got = force_capper(np.array([0.25, 0.25]), CAP)
     assert np.linalg.norm(got) == pytest.approx(CAP, abs=1e-12)
 
@@ -97,8 +92,6 @@ def test_the_capper_does_not_change_what_it_is_handed():
 # --- the cap inside step ------------------------------------------------------------------
 
 def fast_scattered_flock(seed):
-    """Birds in random directions at up to max speed: alignment's push is
-    large here, which is exactly what the cap exists for."""
     return random_flock(seed=seed, n_birds=12)
 
 
@@ -113,9 +106,6 @@ def test_every_recorded_force_is_within_the_cap(seed):
 
 
 def test_the_recorded_forces_rebuild_the_velocity_update_under_the_cap():
-    """The label invariant, with the cap firing: the recorded forces are the
-    capped ones, the ones that moved the bird. Recording the raw force while
-    applying the capped one would break this and nothing else."""
     positions, velocities = fast_scattered_flock(3)
     ph = PHYSICS_CRUISING
     _, new_velocities, forces = step(positions, velocities, ph)
@@ -131,8 +121,6 @@ def test_the_recorded_forces_rebuild_the_velocity_update_under_the_cap():
 
 
 def test_each_rule_is_capped_on_its_own_not_the_total():
-    """Alignment and cohesion each under the cap, their sum over it: nothing
-    may be shrunk, and the world must move exactly as it would uncapped."""
     positions = np.array([[50.0, 50.0], [50.0, 75.0]])     # 25 apart
     velocities = np.array([[1.0, 0.0], [1.0, 0.25]])
     ph = replace(PHYSICS, max_force=CAP)
@@ -149,8 +137,6 @@ def test_each_rule_is_capped_on_its_own_not_the_total():
 
 
 def test_the_cap_applies_after_the_weight():
-    """Raw alignment 0.5, weight 0.5: the weighted push is 0.25, under the
-    cap, so it is recorded whole. Capping first gives 0.3 * 0.5 = 0.15."""
     positions = np.array([[50.0, 50.0], [50.0, 55.0]])
     velocities = np.array([[1.0, 0.0], [1.0, 0.5]])
     ph = replace(PHYSICS, w_ali=0.5, max_force=CAP)
@@ -173,9 +159,6 @@ def test_step_reads_edge_softness():
 
 
 def test_step_softens_all_three_rules():
-    """A neighbour in each rule's fade zone: 17 units (separation, 15-20),
-    27 (alignment, 22.5-30), 37 (cohesion, 30-40). Each recorded force must be
-    its rule at the physics' softness, and must differ from the hard edge."""
     here = np.array([50.0, 50.0])
     positions = np.array([here, here + [17.0, 0.0], here + [0.0, 27.0], here + [-37.0, 0.0]])
     velocities = np.array([[1.0, 0.0], [0.9, 0.1], [0.8, -0.2], [1.1, 0.3]])
@@ -199,10 +182,6 @@ def test_step_softens_all_three_rules():
 
 
 def test_the_shipped_world_still_flocks():
-    """The cap must trim the early chaos, not stop flocks forming. These six
-    flocks reach a mean polarisation of 0.80 after 250 ticks; with alignment's
-    weight lowered to 0.1 and no cap they reach 0.57, which is the failure this
-    guards."""
     rng = np.random.default_rng(20260926)
     ph = PHYSICS_CRUISING
     final = []

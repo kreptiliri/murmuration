@@ -47,7 +47,6 @@ def shuffle_birds(values, order):
 # --- the contract train.py relies on --------------------------------------------------
 
 def test_a_window_and_its_geometry_become_one_tick_of_prediction(model, x, pair):
-    """Same output as PerBirdTransformer; one extra input."""
     assert model(x, pair).shape == (BATCH, N_FEATURES)
 
 
@@ -59,8 +58,6 @@ def test_the_number_of_birds_comes_from_n_features():
 
 @pytest.mark.parametrize("context", [0, 1])
 def test_it_needs_at_least_one_move(context):
-    """Tick 0 is thrown away (see below), so context 1 leaves a bird with
-    nothing to say about itself. Refuse it at construction, not at the first batch."""
     with pytest.raises(ValueError):
         flocker.RelPerBirdTransformer(**{**SMALL, "context": context})
 
@@ -75,10 +72,6 @@ def test_it_is_built_from_rel_blocks(model):
 # --- what makes it relative ------------------------------------------------------------
 
 def test_the_absolute_position_is_ignored(model, x, pair):
-    """The point of the upgrade. train.py hands every model the same window:
-    tick 0 is the birds' positions, the ticks after it are moves. Positions
-    now reach the model only through the pair geometry, so tick 0 must not
-    move the answer at all. If it does, the seam is back."""
     moved = x.clone()
     moved[:, 0] = torch.randn(BATCH, N_FEATURES) * 5
     torch.testing.assert_close(model(moved, pair), model(x, pair), atol=0, rtol=0)
@@ -95,7 +88,6 @@ def test_the_geometry_is_used(model, x, pair):
 
 
 def test_every_block_is_handed_the_geometry(model, x, pair):
-    """Easy to pass it to the first block and forget the rest."""
     seen = []
     def hook(module, args, kwargs, output):
         handed = list(args[1:]) + list(kwargs.values())
@@ -108,8 +100,6 @@ def test_every_block_is_handed_the_geometry(model, x, pair):
 
 
 def test_a_birds_moves_stay_in_order():
-    """With context 3 a bird has two moves, and which came first is how it is
-    turning. Summing them into one token throws that away."""
     torch.manual_seed(0)
     model = flocker.RelPerBirdTransformer(**{**SMALL, "context": 3})
     torch.manual_seed(4)
@@ -122,9 +112,6 @@ def test_a_birds_moves_stay_in_order():
 
 @pytest.mark.parametrize("context", [2, 3])
 def test_relabelling_the_birds_relabels_the_answers(context, pair):
-    """The per-bird property, now with the geometry relabelled on both axes.
-    Context 3 as well: at context 2 a bird has one move, and a bare reshape
-    into tokens happens to give the right answer. At 3 it mixes birds."""
     torch.manual_seed(0)
     model = flocker.RelPerBirdTransformer(**{**SMALL, "context": context})
     torch.manual_seed(1)

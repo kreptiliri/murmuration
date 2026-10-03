@@ -21,11 +21,6 @@ CEILING = 5.0
 
 
 def window_of(velocities, *, context=CONTEXT, dt=DT, start=50.0):
-    """One row in which every bird holds a constant velocity.
-
-    The copier reads zero on such a row, so anything the clamped baseline
-    returns is the clamp and nothing else.
-    """
     velocities = np.asarray(velocities, dtype=float)
     ticks = np.arange(context, dtype=float)[:, None, None]
     positions = start + velocities[None] * ticks * dt
@@ -43,8 +38,6 @@ def speeds(flat):
 # --- the baseline as a function ------------------------------------------------
 
 def test_inside_the_band_it_is_exactly_the_copier():
-    """A bird already flying at a legal speed is never touched, so the clamped
-    baseline has to agree with the plain copier to the last bit."""
     window = window_of([[3.0, 0.0], [0.0, -2.5], [2.0, 2.0], [-1.5, 1.0]])
 
     plain = train.copier_baseline(window, dt=DT)
@@ -55,9 +48,6 @@ def test_inside_the_band_it_is_exactly_the_copier():
 
 
 def test_the_floor_is_applied_to_the_speed_not_to_each_component():
-    """The floor, applied to the speed. A bird at (0.6, 0.6) has speed 0.849, under the
-    floor. Scaling to length 1.0 gives (0.7071, 0.7071); clamping each component
-    to 1.0 gives (1.0, 1.0), which is speed 1.414 - a different bird."""
     window = window_of([[0.6, 0.6]] * N_SLOTS)
 
     change = train.clamped_copier_baseline(window, dt=DT, min_speed=FLOOR,
@@ -72,8 +62,6 @@ def test_the_floor_is_applied_to_the_speed_not_to_each_component():
 
 
 def test_the_ceiling_is_applied_to_the_speed_not_to_each_component():
-    """The ceiling, where a componentwise clamp does nothing at all.
-    (4.0, 4.0) is speed 5.657, over the ceiling, but neither component is."""
     window = window_of([[4.0, 4.0]] * N_SLOTS)
 
     change = train.clamped_copier_baseline(window, dt=DT, min_speed=FLOOR,
@@ -88,9 +76,6 @@ def test_the_ceiling_is_applied_to_the_speed_not_to_each_component():
 
 
 def test_it_returns_a_change_in_velocity_not_a_velocity():
-    """Same units as `copier_baseline` and as the training target. Returning the
-    clamped velocity itself is off by the current velocity everywhere, which is
-    large and completely plausible."""
     window = window_of([[3.0, 0.0]] * N_SLOTS)
 
     change = train.clamped_copier_baseline(window, dt=DT, min_speed=FLOOR,
@@ -100,8 +85,6 @@ def test_it_returns_a_change_in_velocity_not_a_velocity():
 
 
 def test_each_bird_is_clamped_on_its_own():
-    """One speed computed over the whole flattened row would drag every bird
-    toward one correction and still return the right shape."""
     window = window_of([[0.6, 0.6], [3.0, 0.0], [4.0, 4.0], [0.0, -2.0]])
 
     change = per_bird(train.clamped_copier_baseline(
@@ -116,8 +99,6 @@ def test_each_bird_is_clamped_on_its_own():
 
 
 def test_the_limits_come_from_the_caller():
-    """The same window under two floors has to give two answers, or the
-    limits are hard-coded and the argument is decoration."""
     window = window_of([[1.5, 0.0]] * N_SLOTS)
 
     at_one = train.clamped_copier_baseline(window, dt=DT, min_speed=1.0,
@@ -132,7 +113,6 @@ def test_the_limits_come_from_the_caller():
 
 
 def test_it_needs_three_ticks_like_the_copier():
-    """Two ticks give one velocity and no way to extrapolate a second."""
     window = window_of([[3.0, 0.0]] * N_SLOTS, context=2)
 
     with pytest.raises(ValueError):
@@ -141,9 +121,6 @@ def test_it_needs_three_ticks_like_the_copier():
 
 
 def test_it_cannot_be_handed_a_target():
-    """Pinned by signature. Subtracting a function of the input is a
-    rewording of the question. Subtracting anything built from the answer is the
-    leak this project has already been caught by once."""
     taken = set(inspect.signature(train.clamped_copier_baseline).parameters)
 
     assert not taken & {"targets", "y", "truth", "velocities", "forces",
@@ -153,9 +130,6 @@ def test_it_cannot_be_handed_a_target():
 
 
 def test_a_bird_at_rest_does_not_come_back_as_nan():
-    """Zero velocity has no direction to scale, so the obvious implementation
-    divides by zero. A NaN here would ride into the training target and poison
-    the loss silently."""
     window = window_of([[0.0, 0.0], [3.0, 0.0], [0.0, 0.0], [2.0, 2.0]])
 
     change = train.clamped_copier_baseline(window, dt=DT, min_speed=FLOOR,
@@ -165,7 +139,6 @@ def test_a_bird_at_rest_does_not_come_back_as_nan():
 
 
 def test_it_is_shaped_like_the_copier_on_real_windows(floor_one_dataset):
-    """Both baselines have to be drop-in substitutes for each other in `main()`."""
     import windows
     x, _ = windows.build_windows(str(floor_one_dataset), context=CONTEXT,
                                  clips=range(2))
@@ -179,9 +152,6 @@ def test_it_is_shaped_like_the_copier_on_real_windows(floor_one_dataset):
 
 
 def test_the_two_baselines_actually_differ_on_real_data(floor_one_dataset):
-    """The control for every test below. If the clamp never fires on this
-    dataset then `--residual clamped` and `--residual copier` are the same run
-    and nothing downstream is being checked."""
     import windows
     x, _ = windows.build_windows(str(floor_one_dataset), context=CONTEXT,
                                  clips=range(2))
@@ -214,7 +184,6 @@ def floor_one_dataset(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def floor_two_dataset(tmp_path_factory):
-    """A dataset at the *old* floor, so a hard-coded 1.0 is visible."""
     import sys
     from dataclasses import replace
     from pathlib import Path
@@ -229,7 +198,6 @@ def floor_two_dataset(tmp_path_factory):
 
 
 def scores(out):
-    """Everything main() prints except the wall-clock line, which never repeats."""
     return [line for line in out.splitlines()
             if line.startswith("R2 ") or line.startswith("skill ")]
 
@@ -240,8 +208,6 @@ def flags(dataset, *extra):
 
 
 def test_the_default_is_no_residual(floor_one_dataset, capsys):
-    """Every score already recorded was trained on the plain target. `none` and
-    no flag at all have to be the same run, to the digit."""
     train.main(flags(floor_one_dataset))
     without = scores(capsys.readouterr().out)
     train.main(flags(floor_one_dataset, "--residual", "none"))
@@ -251,7 +217,6 @@ def test_the_default_is_no_residual(floor_one_dataset, capsys):
 
 
 def test_an_unknown_residual_is_refused(floor_one_dataset):
-    """A typo must not quietly train against the plain target for an hour."""
     with pytest.raises(SystemExit):
         train.main(flags(floor_one_dataset, "--residual", "coppier"))
 
@@ -271,8 +236,6 @@ def spy_on(monkeypatch, name):
 
 def test_the_clamped_choice_reads_the_datasets_own_limits(floor_two_dataset,
                                                           monkeypatch):
-    """End to end. This dataset was generated at `min_speed` 2.0. A
-    baseline that assumes 1.0 clamps nothing and looks like the plain copier."""
     seen = spy_on(monkeypatch, "clamped_copier_baseline")
 
     train.main(flags(floor_two_dataset, "--residual", "clamped"))
@@ -286,8 +249,6 @@ def test_the_clamped_choice_reads_the_datasets_own_limits(floor_two_dataset,
 
 def test_the_target_the_model_trains_on_is_the_residual(floor_one_dataset,
                                                         monkeypatch):
-    """The heart of it. The Y scaler is fitted on whatever the model
-    is asked to learn, so watching what it is handed says which target won."""
     import windows
     y_learn = windows.build_windows(str(floor_one_dataset), context=CONTEXT,
                                     clips=range(4))[1]
@@ -307,18 +268,6 @@ def test_the_target_the_model_trains_on_is_the_residual(floor_one_dataset,
 
 def test_the_batch_the_model_learns_from_is_the_residual(floor_one_dataset,
                                                          monkeypatch):
-    """The other half, and the one that survives every check above.
-
-    Fitting the scaler on the residual and adding the baseline back at scoring
-    can both be right while the loop still hands the model the raw target. The
-    model then learns the full velocity change, has it scaled as though it were
-    a leftover, and gets a baseline added on top. Nothing raises and the score
-    is merely bad.
-
-    Every two-axis array handed to `apply_squash` is a target: the held-out set
-    once, then one per batch. Over a single pass those batches partition the
-    training rows, so the values seen must be exactly the two residual arrays.
-    """
     import windows
     x_learn, y_learn = windows.build_windows(str(floor_one_dataset),
                                              context=CONTEXT, clips=range(4))
@@ -349,8 +298,6 @@ def test_the_batch_the_model_learns_from_is_the_residual(floor_one_dataset,
 
 def test_the_baseline_is_added_back_before_scoring(floor_one_dataset,
                                                    monkeypatch):
-    """With the model's unscaled output forced to zero, the prediction
-    that reaches `skill` must be the baseline itself - nothing else."""
     import windows
     x_check = windows.build_windows(str(floor_one_dataset), context=CONTEXT,
                                     clips=range(4, 6))[0]
@@ -372,8 +319,6 @@ def test_the_baseline_is_added_back_before_scoring(floor_one_dataset,
 
 def test_nothing_is_added_back_when_the_residual_is_off(floor_one_dataset,
                                                         monkeypatch):
-    """The control for the test above: the same forced-zero model with
-    `--residual none` has to score exactly zero, not the copier."""
     monkeypatch.setattr(train, "cancel_squash",
                         lambda scaler, values: np.zeros_like(np.asarray(values)))
     scored = []
@@ -388,9 +333,6 @@ def test_nothing_is_added_back_when_the_residual_is_off(floor_one_dataset,
 
 def test_the_held_out_baseline_is_built_from_the_held_out_windows(
         floor_one_dataset, monkeypatch):
-    """Two clips held out of six give a different row count from the
-    four trained on, so the wrong one is a shape error - until a split happens
-    to be symmetric, and then it is silent."""
     import windows
     n_learn = len(windows.build_windows(str(floor_one_dataset),
                                         context=CONTEXT, clips=range(4))[0])
@@ -408,9 +350,6 @@ def test_the_held_out_baseline_is_built_from_the_held_out_windows(
 
 
 def test_the_held_out_target_is_never_shifted(floor_one_dataset, monkeypatch):
-    """The residual is a training device. Scoring still compares a full
-    prediction against the real velocity change, or the R² is against a target
-    nobody cares about."""
     import windows
     y_check = windows.build_windows(str(floor_one_dataset), context=CONTEXT,
                                     clips=range(4, 6))[1]
@@ -425,7 +364,6 @@ def test_the_held_out_target_is_never_shifted(floor_one_dataset, monkeypatch):
 
 
 def test_a_residual_run_is_repeatable_under_a_seed(floor_one_dataset, capsys):
-    """Nothing in the residual path may reach for unseeded randomness."""
     train.main(flags(floor_one_dataset, "--residual", "clamped", "--seed", "3"))
     first = scores(capsys.readouterr().out)
     train.main(flags(floor_one_dataset, "--residual", "clamped", "--seed", "3"))

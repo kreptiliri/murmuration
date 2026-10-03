@@ -24,18 +24,10 @@ def x():
 
 
 def test_a_window_comes_back_the_same_shape(attention, x):
-    """Attention re-mixes the ticks; it does not change how many there are."""
     assert attention(x).shape == x.shape
 
 
 def test_it_matches_pytorchs_own_attention(attention, x):
-    """The reference check, run on every commit instead of once by hand.
-
-    Rebuilds the same computation out of `torch.nn.functional`, using this
-    module's own weights, and demands agreement. Catches a wrong scale factor,
-    a head reshape that interleaves instead of splitting, and a mask applied to
-    the wrong axis - none of which show up as an error at training time.
-    """
     import torch.nn.functional as F
 
     batch, context, _ = x.shape
@@ -54,12 +46,6 @@ def test_it_matches_pytorchs_own_attention(attention, x):
 
 
 def test_a_tick_cannot_see_the_future(attention, x):
-    """The one that matters, and it is independent of the reference above.
-
-    Change the last tick of the input. Every earlier position's output must be
-    bit-for-bit identical. If it moves, the mask leaks and the model is reading
-    the answer it is being asked to predict.
-    """
     before = attention(x)
 
     tampered = x.clone()
@@ -70,7 +56,6 @@ def test_a_tick_cannot_see_the_future(attention, x):
 
 
 def test_every_earlier_tick_is_protected_not_just_the_last(attention, x):
-    """A mask off by one passes the test above and fails this one."""
     for tick in range(1, CONTEXT):
         tampered = x.clone()
         tampered[:, tick] = torch.randn(BATCH, D_MODEL)
@@ -81,7 +66,6 @@ def test_every_earlier_tick_is_protected_not_just_the_last(attention, x):
 
 
 def test_the_first_tick_only_ever_sees_itself(attention):
-    """With nothing to attend to but itself, tick 0 is a function of tick 0 alone."""
     torch.manual_seed(2)
     one = torch.randn(1, CONTEXT, D_MODEL)
     other = one.clone()
@@ -92,13 +76,11 @@ def test_the_first_tick_only_ever_sees_itself(attention):
 
 
 def test_the_heads_have_to_divide_the_width(attention):
-    """5 heads into 32 channels is a silent truncation, not an arrangement."""
     with pytest.raises(ValueError):
         flocker.CausalSelfAttention(d_model=32, n_heads=5)
 
 
 def test_two_calls_agree(attention, x):
-    """No dropout, no randomness at inference. A score has to be repeatable."""
     torch.testing.assert_close(attention(x), attention(x), atol=0, rtol=0)
 
 

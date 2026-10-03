@@ -68,8 +68,6 @@ def push(labels, weights):
 # --- predict: the model's answers, in real units ------------------------------------------
 
 def test_predict_without_a_block_is_the_normal_model_in_real_units(run):
-    """The same numbers train.py scores: the model's output, un-squashed with
-    the saved answer scaler, one row per window, two numbers per bird."""
     data, _, ck = run
     x, _, _ = clips_of(data, range(7, 10))
     moves, pair = model_inputs(ck, x)
@@ -122,8 +120,6 @@ def test_score_is_1_for_perfect_and_0_for_guessing_the_average():
 
 
 def test_score_is_the_one_train_py_prints(run):
-    """R2 model at the end of training is pooled over every number against the
-    mean of each column. Same formula here, so the two can be put side by side."""
     rng = np.random.default_rng(1)
     truth = rng.normal(size=(300, 4))
     guess = truth + rng.normal(size=(300, 4)) * 0.3
@@ -148,8 +144,6 @@ def test_rules_explain_marks_the_birds_whose_change_is_the_three_pushes():
 
 
 def test_on_real_clips_most_birds_are_the_three_pushes_and_those_rebuild_the_answer(run):
-    """The speed limits decide the rest. On the kept birds the pushes add up to
-    the real change in velocity, which is what makes them fair to score by."""
     data, _, _ = run
     x, y, labels = clips_of(data, range(N_CLIPS))
     keep = ablate.rules_explain(y, labels, dt=DT)
@@ -161,8 +155,6 @@ def test_on_real_clips_most_birds_are_the_three_pushes_and_those_rebuild_the_ans
 # --- push_lost: how much of each rule the switched-off model stopped doing ----------------------
 
 def test_push_lost_reads_back_the_fraction_of_each_rule_that_went_missing():
-    """If switching off takes away all of alignment and half of separation and
-    leaves cohesion alone, the answers lost are exactly that much of each push."""
     labels = fake_pushes(3)
     lost = push(labels, {"separation": 0.5, "alignment": 1.0, "cohesion": 0.0}).reshape(4000, -1)
     fractions = ablate.push_lost(lost, labels, dt=DT)
@@ -173,8 +165,6 @@ def test_push_lost_reads_back_the_fraction_of_each_rule_that_went_missing():
 
 
 def test_push_lost_is_a_fraction_so_a_big_push_does_not_drown_a_small_one():
-    """Alignment is 66% of the real push. Losing all of the small separation
-    still reads 1.0, not a sliver of the total."""
     labels = fake_pushes(4)
     lost = push(labels, {"separation": 1.0, "alignment": 0.0, "cohesion": 0.0}).reshape(4000, -1)
     bigger = dict(labels)
@@ -185,8 +175,6 @@ def test_push_lost_is_a_fraction_so_a_big_push_does_not_drown_a_small_one():
 
 
 def test_push_lost_tells_apart_pushes_that_point_against_each_other():
-    """Separation and cohesion point opposite on average. Fitted together, the
-    loss still goes to the right one."""
     labels = fake_pushes(5)
     rng = np.random.default_rng(6)
     labels["cohesion"] = -0.6 * labels["separation"] + rng.normal(size=labels["separation"].shape) * 0.2
@@ -223,16 +211,12 @@ def test_push_explained_is_1_when_the_loss_is_only_pushes():
 
 
 def test_push_explained_is_near_0_when_the_loss_has_nothing_to_do_with_the_pushes():
-    """The block 1 trap: a lot lost, none of it a rule. The fractions alone
-    would look small and calm, this number says they describe almost nothing."""
     labels = fake_pushes(10)
     lost = np.random.default_rng(11).normal(size=(4000, 2 * N_BIRDS))
     assert ablate.push_explained(lost, labels, dt=DT) < 0.01
 
 
 def test_a_shift_that_is_no_push_is_not_explained():
-    """Every bird's answer moved by the same amount is damage the three pushes
-    cannot account for, so it counts against them, it is not averaged away."""
     labels = fake_pushes(14)
     lost = np.full((4000, 2 * N_BIRDS), 0.05)
     assert ablate.push_explained(lost, labels, dt=DT) == pytest.approx(0.0, abs=0.01)
@@ -262,8 +246,6 @@ def report_for(run):
 
 
 def test_the_report_has_the_normal_score_and_a_row_per_block_and_note(run):
-    """Three ways to switch a block off: the average note, a blank one, and
-    each bird hearing only itself."""
     report = report_for(run)
     assert isinstance(report["normal"], float)
     assert 0 < report["kept"] <= 1
@@ -285,8 +267,6 @@ def test_the_normal_score_is_the_normal_model_on_the_check_clips(run):
 
 
 def test_the_average_note_comes_from_the_learn_clips(run):
-    """The damage is scored on the check clips, so the note must not be built
-    from them. Rebuild the average row by hand from the learn clips."""
     data, _, ck = run
     x_learn, _, _ = clips_of(data, range(0, 7))
     x_check, y_check, _ = clips_of(data, range(7, 10))
@@ -298,8 +278,6 @@ def test_the_average_note_comes_from_the_learn_clips(run):
 
 
 def test_a_model_that_never_listens_loses_nothing(run):
-    """Every listening step writes zero, so both notes are zero and switching
-    off changes no answer: every score equals the normal one, nothing is lost."""
     data, ckpts, _ = run
     ck = train.load_checkpoint(max(ckpts.glob("step_*.pt")))
     for block in ck["model"].blocks:

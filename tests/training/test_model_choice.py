@@ -20,7 +20,6 @@ N_FEATURES = N_SLOTS * 2
 
 @pytest.fixture(scope="module")
 def tiny_dataset(tmp_path_factory):
-    """Small enough to train in a second, long enough for a real split."""
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -41,16 +40,12 @@ def flags(dataset, *extra):
 # --- which model gets built ----------------------------------------------------
 
 def test_the_default_is_still_the_linear_model():
-    """Every score already recorded was the linear model. The default moving
-    would silently change what those numbers mean."""
     model = train.build_model(context=CONTEXT, n_features=N_FEATURES)
 
     assert isinstance(model, train.Model)
 
 
 def test_the_transformer_is_the_one_in_flocker():
-    """Not a second copy built inside train.py. `flocker.Transformer` is the
-    thing 34 tests in tests/transformer/ are about."""
     model = train.build_model(context=CONTEXT, n_features=N_FEATURES,
                               kind="transformer")
 
@@ -58,7 +53,6 @@ def test_the_transformer_is_the_one_in_flocker():
 
 
 def test_the_transformer_maps_a_window_to_one_tick_of_prediction():
-    """Same contract as the linear model: a whole window in, one tick out."""
     model = train.build_model(context=CONTEXT, n_features=N_FEATURES,
                               kind="transformer")
 
@@ -68,14 +62,11 @@ def test_the_transformer_maps_a_window_to_one_tick_of_prediction():
 
 
 def test_an_unknown_kind_is_refused():
-    """A typo must not fall back to the linear model and train for an hour."""
     with pytest.raises(ValueError):
         train.build_model(context=CONTEXT, n_features=N_FEATURES, kind="lienar")
 
 
 def test_two_transformers_under_the_same_seed_are_identical():
-    """A score has to be repeatable, and the transformer has 403,096 ways not
-    to be."""
     torch.manual_seed(7)
     first = train.build_model(context=CONTEXT, n_features=N_FEATURES,
                               kind="transformer")
@@ -88,13 +79,6 @@ def test_two_transformers_under_the_same_seed_are_identical():
 
 
 def test_the_transformer_can_memorise_eight_windows():
-    """The wiring check the linear model already gets.
-
-    A correctly wired model can overfit a handful of examples into the ground.
-    If it cannot, an axis is transposed or the context is mis-sliced, and no
-    amount of real training will fix it - it converges to something plausible
-    and wrong instead.
-    """
     torch.manual_seed(0)
     inputs = torch.randn(8, CONTEXT, N_FEATURES)
     targets = torch.randn(8, N_FEATURES)
@@ -117,8 +101,6 @@ def test_the_transformer_can_memorise_eight_windows():
 
 
 def test_main_trains_the_transformer_end_to_end(tiny_dataset, capsys):
-    """The whole point: one command, from a clone, reproduces a transformer
-    number."""
     code = train.main(flags(tiny_dataset, "--model", "transformer"))
 
     printed = capsys.readouterr().out
@@ -127,13 +109,6 @@ def test_main_trains_the_transformer_end_to_end(tiny_dataset, capsys):
 
 
 def test_the_model_flag_actually_reaches_build_model(tiny_dataset, monkeypatch):
-    """`--model` being dropped on the floor is invisible from the outside.
-
-    The run completes, the receipt prints, the score is plausible - and the
-    one-layer Linear trained for an hour under the transformer's name.
-    Nothing else in this file catches it, because everything else a linear model
-    also does.
-    """
     asked = []
     real = train.build_model
     monkeypatch.setattr(train, "build_model",
@@ -149,7 +124,6 @@ def test_the_model_flag_actually_reaches_build_model(tiny_dataset, monkeypatch):
 # --- where the augmentation is applied -----------------------------------------
 
 def spy_on_permute(monkeypatch):
-    """Record every call to permute_slots without changing what it does."""
     seen = []
     real = train.permute_slots
 
@@ -163,8 +137,6 @@ def spy_on_permute(monkeypatch):
 
 
 def test_augment_off_never_calls_it(tiny_dataset, monkeypatch):
-    """Every score recorded before the flag existed was measured without this.
-    If it runs when the flag is off, none of them reproduce and nothing says so."""
     seen = spy_on_permute(monkeypatch)
 
     train.main(flags(tiny_dataset))
@@ -173,7 +145,6 @@ def test_augment_off_never_calls_it(tiny_dataset, monkeypatch):
 
 
 def test_augment_on_calls_it_every_batch(tiny_dataset, monkeypatch):
-    """One draw per row per batch, not once per run."""
     seen = spy_on_permute(monkeypatch)
 
     train.main(flags(tiny_dataset, "--augment"))
@@ -185,13 +156,6 @@ def test_augment_on_calls_it_every_batch(tiny_dataset, monkeypatch):
 
 def test_it_is_handed_raw_positions_not_moves_and_not_scaled(tiny_dataset,
                                                              monkeypatch):
-    """A permutation applied after the scaler, and the only way to catch it.
-
-    Raw windows are absolute coordinates in [0, bounds) - large and positive.
-    `to_moves` output has a first row that size and seven rows near zero.
-    Scaled output is centred on zero. Only the first is acceptable, and the
-    other two raise nothing.
-    """
     seen = spy_on_permute(monkeypatch)
 
     train.main(flags(tiny_dataset, "--augment"))
@@ -207,8 +171,6 @@ def test_it_is_handed_raw_positions_not_moves_and_not_scaled(tiny_dataset,
 
 
 def test_the_window_and_the_target_arrive_together(tiny_dataset, monkeypatch):
-    """Trap: permuting the window and leaving the target alone. The labels are
-    then wrong for eleven of twelve birds and the loss merely plateaus higher."""
     seen = spy_on_permute(monkeypatch)
 
     train.main(flags(tiny_dataset, "--augment"))
@@ -222,15 +184,6 @@ def test_the_window_and_the_target_arrive_together(tiny_dataset, monkeypatch):
 
 def test_the_permuted_target_is_the_one_that_gets_trained_on(tiny_dataset,
                                                              monkeypatch):
-    """`raw_batch, _ = permute_slots(...)`, calling it and throwing the target
-    away.
-
-    Every test above still passes when that happens: permute_slots really was
-    called, with raw positions, with both arrays. The labels are simply wrong
-    for eleven of twelve birds afterwards, and the only symptom is a loss that
-    plateaus higher than it should. Caught by watching what the scaler is
-    actually handed.
-    """
     returned = []
     real_permute = train.permute_slots
     monkeypatch.setattr(train, "permute_slots",
@@ -254,7 +207,6 @@ def test_the_permuted_target_is_the_one_that_gets_trained_on(tiny_dataset,
 
 
 def test_the_held_out_windows_are_never_augmented(tiny_dataset, monkeypatch):
-    """The held-out set is the only honest thing in the run."""
     seen = spy_on_permute(monkeypatch)
 
     train.main(flags(tiny_dataset, "--augment"))
@@ -269,8 +221,6 @@ def test_the_held_out_windows_are_never_augmented(tiny_dataset, monkeypatch):
 
 def test_the_scaler_still_never_sees_the_held_out_clips(tiny_dataset,
                                                         monkeypatch):
-    """The leak that no loss curve shows, re-checked with augmentation on
-    because the augmentation moves where the scaler sits in the chain."""
     seen = []
     real = train.squasher
     monkeypatch.setattr(train, "squasher",
@@ -286,8 +236,6 @@ def test_the_scaler_still_never_sees_the_held_out_clips(tiny_dataset,
 
 
 def test_an_augmented_run_is_repeatable_under_a_seed(tiny_dataset, capsys):
-    """The augmentation draws 12! per row. If it draws from anything but the
-    run's own seed, no augmented score can be compared to another."""
     argv = flags(tiny_dataset, "--augment", "--seed", "3")
 
     train.main(argv)

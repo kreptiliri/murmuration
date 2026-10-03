@@ -52,8 +52,6 @@ def test_one_row_per_in_pass_snapshot_in_training_order(run):
 
 
 def test_only_the_in_pass_snapshots_not_the_pass_files(run):
-    """The folder also holds pass_*.pt. Mixed in, pass 1 would sit next to
-    batch 1 on the x-axis."""
     _, ckpts, _, curve = run
     assert list(ckpts.glob("pass_*.pt")), "the fixture should have both kinds"
     assert len(curve) == len(step_files(ckpts))
@@ -66,8 +64,6 @@ def test_each_row_carries_how_far_through_training_it_was(run):
 
 
 def test_each_row_is_that_snapshots_own_readability(run):
-    """Row for batch N must be batch N's scores, not the last model's or the
-    first's, spelled out by hand for the first, a middle and the last one."""
     _, ckpts, (x_l, lab_l, x_c, lab_c), curve = run
     paths = step_files(ckpts)
     for i in [0, len(paths) // 2, len(paths) - 1]:
@@ -100,7 +96,6 @@ def test_main_sweep_writes_the_curve_to_a_file(run, tmp_path):
 
 
 def test_main_sweep_without_somewhere_to_save_it_is_refused(run):
-    """Minutes of work printed to a terminal and gone."""
     data, ckpts, _, _ = run
     with pytest.raises(SystemExit):
         probe.main(["--checkpoint-dir", str(ckpts), "--data", str(data), "--clips", str(N_CLIPS),

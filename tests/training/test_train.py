@@ -14,7 +14,6 @@ N_FEATURES = N_SLOTS * 2
 
 @pytest.fixture(scope="module")
 def tiny_dataset(tmp_path_factory):
-    """Small enough to train in a second, long enough for a real split."""
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -30,9 +29,6 @@ def tiny_dataset(tmp_path_factory):
 
 def test_the_default_learning_rate_is_the_one_every_score_was_measured_at(
         tiny_dataset, monkeypatch):
-    """0.01 was chosen for the one-layer Linear. Every transformer number in the
-    project was measured at 1e-3, so a run that forgets the flag has to be the
-    run that was measured, not a different one that still completes."""
     seen = []
     real = torch.optim.Adam
     monkeypatch.setattr(torch.optim, "Adam",
@@ -48,14 +44,12 @@ def test_the_default_learning_rate_is_the_one_every_score_was_measured_at(
 # --- trap 1: the split ---------------------------------------------------------
 
 def test_the_splits_are_disjoint():
-    """One clip in both halves and the test score is partly a memory test."""
     train_clips, test_clips = train.split_by_clip(200, train_fraction=0.7)
 
     assert not (set(train_clips) & set(test_clips))
 
 
 def test_the_splits_cover_every_clip():
-    """Silently dropping clips wastes data and hides itself."""
     train_clips, test_clips = train.split_by_clip(200, train_fraction=0.7)
 
     assert sorted(set(train_clips) | set(test_clips)) == list(range(200))
@@ -70,7 +64,6 @@ def test_the_train_fraction_is_respected():
 # --- trap 2: the units ---------------------------------------------------------
 
 def test_scaling_is_invertible():
-    """A score printed in scaled units is not comparable to any recorded score."""
     values = np.random.default_rng(0).normal(3.0, 7.0, size=(500, N_FEATURES))
     scaler = train.squasher(values)
 
@@ -80,7 +73,6 @@ def test_scaling_is_invertible():
 
 
 def test_scaled_values_are_actually_scaled():
-    """Guards against fit/apply being silently the identity."""
     values = np.random.default_rng(1).normal(3.0, 7.0, size=(500, N_FEATURES))
     scaler = train.squasher(values)
 
@@ -91,13 +83,6 @@ def test_scaled_values_are_actually_scaled():
 
 
 def test_the_scaler_uses_only_what_it_was_fitted_on():
-    """The test set must not influence the numbers used to scale it.
-
-    Fitting on train and applying to test is correct. Fitting on everything is
-    a leak that is invisible in the loss curve, so it is pinned here: applying a
-    train-fitted scaler to differently-distributed data must NOT come out
-    centred.
-    """
     rng = np.random.default_rng(2)
     reference = rng.normal(0.0, 1.0, size=(500, N_FEATURES))
     other = rng.normal(50.0, 1.0, size=(500, N_FEATURES))
@@ -109,7 +94,6 @@ def test_the_scaler_uses_only_what_it_was_fitted_on():
 
 
 def test_a_zero_variance_column_does_not_divide_by_zero():
-    """A dead slot, or a bird that never moves, is a constant column."""
     values = np.ones((50, N_FEATURES))
     scaler = train.squasher(values)
 
@@ -121,7 +105,6 @@ def test_a_zero_variance_column_does_not_divide_by_zero():
 # --- trap 3: the wiring --------------------------------------------------------
 
 def test_the_model_maps_a_window_to_one_tick_of_prediction():
-    """A whole window in, one tick of velocity change out."""
     model = train.build_model(context=CONTEXT, n_features=N_FEATURES)
     batch = torch.zeros(4, CONTEXT, N_FEATURES)
 
@@ -131,13 +114,6 @@ def test_the_model_maps_a_window_to_one_tick_of_prediction():
 
 
 def test_the_model_can_memorise_eight_windows():
-    """The wiring check, and the only test here that actually trains.
-
-    A correctly wired model can overfit a handful of examples into the ground.
-    If it cannot, an axis is transposed or the target is misaligned, and no
-    amount of real training will fix it - it will simply converge to something
-    plausible and wrong. Run this before any long run, not after.
-    """
     torch.manual_seed(0)
     inputs = torch.randn(8, CONTEXT, N_FEATURES)
     targets = torch.randn(8, N_FEATURES)
@@ -160,7 +136,6 @@ def test_the_model_can_memorise_eight_windows():
 
 
 def test_two_models_built_under_the_same_seed_are_identical():
-    """A timing number and a score both need the run to be repeatable."""
     torch.manual_seed(7)
     first = train.build_model(context=CONTEXT, n_features=N_FEATURES)
     torch.manual_seed(7)
@@ -189,7 +164,6 @@ def test_skill_is_one_for_a_perfect_prediction():
 
 
 def test_skill_is_negative_when_worse_than_the_baseline():
-    """The result that matters. A model below its baseline learned nothing."""
     rng = np.random.default_rng(5)
     truth = rng.normal(size=(100, N_FEATURES))
     baseline = truth + rng.normal(scale=0.1, size=truth.shape)
@@ -201,7 +175,6 @@ def test_skill_is_negative_when_worse_than_the_baseline():
 # --- trap 5: the input arrangement ---------------------------------------------
 
 def test_to_moves_keeps_the_shape():
-    """The model is built for `context` ticks. np.diff gives context-1."""
     rng = np.random.default_rng(6)
     positions = rng.normal(size=(20, CONTEXT, N_FEATURES))
 
@@ -209,12 +182,6 @@ def test_to_moves_keeps_the_shape():
 
 
 def test_to_moves_leaves_the_first_tick_alone():
-    """pos(0) is the only thing carrying where the birds are, not just how they move.
-
-    Replacing it with a zero - anchoring each bird to its own start - scores
-    better and flattens every bird onto the origin, destroying the inter-bird
-    geometry all three rules are made of. Measured 2026-09-15.
-    """
     rng = np.random.default_rng(7)
     positions = rng.normal(size=(20, CONTEXT, N_FEATURES))
 
@@ -222,7 +189,6 @@ def test_to_moves_leaves_the_first_tick_alone():
 
 
 def test_to_moves_throws_nothing_away():
-    """A cumulative sum maps it back. Identical information, identical ceiling."""
     rng = np.random.default_rng(8)
     positions = rng.normal(size=(20, CONTEXT, N_FEATURES))
 
@@ -252,7 +218,6 @@ def test_the_copier_is_the_previous_velocity_change():
 
 
 def test_the_copier_predicts_no_change_at_constant_velocity():
-    """No acceleration in, no acceleration out - the copier is a second difference."""
     steady = np.arange(CONTEXT)[None, :, None] * np.ones((5, 1, N_FEATURES)) * 0.4
 
     predicted = train.copier_baseline(steady, dt=0.1)
@@ -261,7 +226,6 @@ def test_the_copier_predicts_no_change_at_constant_velocity():
 
 
 def test_the_copier_refuses_a_context_it_cannot_read():
-    """Two ticks give one velocity and no change in it. Fail loudly, not quietly."""
     with pytest.raises(ValueError, match="3 ticks"):
         train.copier_baseline(np.zeros((5, 2, N_FEATURES)), dt=0.1)
 
@@ -273,7 +237,6 @@ generate = pytest.importorskip("generate")
 
 @pytest.fixture(scope="module")
 def tiny_dataset(tmp_path_factory):
-    """Small enough to train in a second, long enough for a real split."""
     import sys
     sys.path.insert(0, str(__import__("pathlib").Path(__file__).resolve().parents[1]))
     from world import PHYSICS_CRUISING
@@ -286,7 +249,6 @@ def tiny_dataset(tmp_path_factory):
 
 
 def test_main_runs_end_to_end_and_reports(tiny_dataset, capsys):
-    """One command, one number. The receipt is the only output."""
     code = train.main(["--data", str(tiny_dataset), "--clips", "6", "--context", "4",
                        "--passes", "3", "--batch", "64", "--report-every", "0"])
 
@@ -297,7 +259,6 @@ def test_main_runs_end_to_end_and_reports(tiny_dataset, capsys):
 
 
 def test_main_is_repeatable_under_a_seed(tiny_dataset, capsys):
-    """A timing number and a score both need the run to be repeatable."""
     flags = ["--data", str(tiny_dataset), "--clips", "6", "--context", "4",
              "--passes", "3", "--batch", "64", "--report-every", "0", "--seed", "1"]
 
@@ -310,11 +271,6 @@ def test_main_is_repeatable_under_a_seed(tiny_dataset, capsys):
 
 
 def test_main_never_fits_the_scaler_on_the_held_out_clips(tiny_dataset, monkeypatch):
-    """The leak that no loss curve shows.
-
-    `squasher` must only ever see the training half. Pinned by watching every
-    call: the number of rows it is handed must never match the held-out set.
-    """
     seen = []
     real = train.squasher
     monkeypatch.setattr(train, "squasher", lambda values: seen.append(len(values)) or real(values))

@@ -48,8 +48,6 @@ def test_every_draft_is_one_row_of_d_model_numbers_per_bird():
 # --- each draft is the right one ---------------------------------------------------------
 
 def test_draft_0_is_each_birds_own_move_after_the_embedding():
-    """With context 2 a bird's token is its one move, x[:, 1] (x[:, 0] is where it
-    started, which the relative model never reads)."""
     model = a_model()
     x, pair = some_input()
     own_moves = x[:, 1].reshape(len(x), N_BIRDS, 2)
@@ -69,8 +67,6 @@ def test_each_later_draft_is_the_block_applied_to_the_draft_before():
 
 
 def test_the_answer_is_written_from_the_last_draft():
-    """The drafts have to belong to the model that flies. If they came from a
-    second copy of the code, the probes would read a model nobody trained on."""
     model = a_model()
     x, pair = some_input()
     last = drafts_of(model, x, pair)[-1]
@@ -81,8 +77,6 @@ def test_the_answer_is_written_from_the_last_draft():
 
 
 def test_forward_goes_through_hidden_states():
-    """One copy of the code, not two. Change what hidden_states hands back and the
-    answer has to change with it."""
     model = a_model()
     x, pair = some_input()
     with torch.no_grad():
@@ -100,8 +94,6 @@ def test_forward_goes_through_hidden_states():
 
 
 def test_the_drafts_do_not_all_come_out_the_same():
-    """Appending the same tensor and then changing it in place leaves a list of
-    identical drafts. Every layer would then probe the same."""
     drafts = drafts_of(a_model(), *some_input())
     for k in range(len(drafts) - 1):
         assert not torch.equal(drafts[k], drafts[k + 1]), f"draft {k} and {k + 1} are the same"
@@ -110,7 +102,6 @@ def test_the_drafts_do_not_all_come_out_the_same():
 # --- the rows are the birds, which is what a probe relies on ---------------------------------
 
 def test_draft_0_knows_only_its_own_bird_and_draft_1_has_listened():
-    """Before the first listening round a bird knows nothing about the others."""
     model = a_model()
     x, pair = some_input()
     nudged = x.clone()
@@ -125,8 +116,6 @@ def test_draft_0_knows_only_its_own_bird_and_draft_1_has_listened():
 
 
 def test_row_i_is_bird_i_in_every_draft():
-    """The probe for bird 5 reads row 5. Shuffle the birds' order going in, and
-    every draft's rows must come out shuffled the same way."""
     model = a_model()
     x, pair = some_input()
     order = torch.randperm(N_BIRDS, generator=torch.Generator().manual_seed(7))

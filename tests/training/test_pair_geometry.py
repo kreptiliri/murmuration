@@ -12,9 +12,6 @@ SCALE = 20.0
 
 
 def windows_from(last_tick, context=2, drift=(0.3, -0.2)):
-    """Position windows whose last tick is `last_tick` (n_birds, 2). Earlier
-    ticks trail behind by `drift` per tick: one (dx, dy) for every bird, or
-    one row per bird."""
     last = np.asarray(last_tick, dtype=np.float64)
     ticks = [last - (context - 1 - t) * np.asarray(drift) for t in range(context)]
     return np.stack(ticks)[None].reshape(1, context, -1)
@@ -31,20 +28,16 @@ def random_windows(seed, n_rows=5, context=2, n_birds=6):
 # --- the contract ------------------------------------------------------------------
 
 def test_one_row_of_numbers_per_pair_of_birds():
-    """(windows, listener, speaker, [dx, dy, distance])."""
     out = train.pair_geometry(random_windows(0, n_rows=5, n_birds=6), bounds=BOUNDS, scale=SCALE)
     assert out.shape == (5, 6, 6, 3)
 
 
 def test_it_comes_back_as_float32():
-    """It goes straight into torch.from_numpy and then into a float32 model.
-    float64 there is a dtype error at the first batch, not a test failure."""
     out = train.pair_geometry(random_windows(1), bounds=BOUNDS, scale=SCALE)
     assert out.dtype == np.float32
 
 
 def test_the_number_of_birds_comes_from_the_windows():
-    """The training tests run on 4 birds, the real data on 12."""
     out = train.pair_geometry(random_windows(2, n_birds=4), bounds=BOUNDS, scale=SCALE)
     assert out.shape[1:] == (4, 4, 3)
 
@@ -59,11 +52,6 @@ def test_it_does_not_change_what_it_is_handed():
 # --- what the numbers mean -------------------------------------------------------------
 
 def test_the_offset_points_from_the_listener_to_the_speaker():
-    """Row [i, j] is where bird j sits as seen from bird i: p_j - p_i.
-
-    The other way round the model still trains, but separation would learn to
-    push birds toward each other's mirror image, and every probe reading the
-    attention pattern would read it backwards."""
     w = windows_from([[50.0, 50.0], [53.0, 46.0]])
     out = train.pair_geometry(w, bounds=BOUNDS, scale=SCALE)[0]
     np.testing.assert_allclose(out[0, 1, :2], np.array([3.0, -4.0]) / SCALE, rtol=1e-6)
@@ -78,8 +66,6 @@ def test_the_third_number_is_the_distance():
 
 
 def test_everything_is_divided_by_the_scale():
-    """Raw distances run up to 70; a network fed numbers that size starts
-    saturated. The scale brings a separation-radius neighbour to 1."""
     w = random_windows(4)
     a = train.pair_geometry(w, bounds=BOUNDS, scale=20.0)
     b = train.pair_geometry(w, bounds=BOUNDS, scale=10.0)
@@ -105,8 +91,6 @@ def test_distance_is_the_length_of_the_offset():
 
 
 def test_it_reads_the_last_tick():
-    """The newest positions. The first tick is up to context-1 moves stale, and
-    a separation push depends on where the neighbour is now."""
     w = windows_from([[50.0, 50.0], [53.0, 46.0]], context=3,
                      drift=[[1.0, 0.0], [-0.5, 2.0]])     # the birds were elsewhere before
     assert not np.allclose(w[0, 0, 2:] - w[0, 0, :2], w[0, -1, 2:] - w[0, -1, :2]), (
@@ -126,8 +110,6 @@ def test_each_window_gets_its_own_geometry():
 # --- the seam ---------------------------------------------------------------------------
 
 def test_two_birds_either_side_of_the_seam_are_close():
-    """The whole reason this function exists. At x = 99 and x = 1 the birds
-    are 2 apart, not 98. The old model had to learn that from raw coordinates."""
     w = windows_from([[99.0, 50.0], [1.0, 50.0]])
     out = train.pair_geometry(w, bounds=BOUNDS, scale=SCALE)[0]
     np.testing.assert_allclose(out[0, 1], np.array([2.0, 0.0, 2.0]) / SCALE, rtol=1e-6, atol=1e-7)
@@ -141,8 +123,6 @@ def test_the_seam_in_both_directions_at_once():
 
 
 def test_positions_outside_the_box_are_wrapped_too():
-    """Training windows are seam-repaired: a bird's path is kept unbroken, so
-    it can sit at x = 104 or x = -3. The geometry must not care."""
     w = windows_from([[104.0, 50.0], [-3.0, 50.0]])
     out = train.pair_geometry(w, bounds=BOUNDS, scale=SCALE)[0]
     np.testing.assert_allclose(out[0, 1], np.array([-7.0, 0.0, 7.0]) / SCALE, rtol=1e-6, atol=1e-7)
@@ -163,8 +143,6 @@ def test_no_distance_is_longer_than_half_the_diagonal():
 # --- the symmetries it has to respect ---------------------------------------------------
 
 def test_sliding_the_whole_flock_changes_nothing():
-    """What makes the upgrade work: the model is handed no absolute position,
-    so it cannot tell one place on the torus from another."""
     w = random_windows(10)
     moved = w + np.tile([37.5, -61.25], w.shape[-1] // 2)
     np.testing.assert_allclose(train.pair_geometry(moved, bounds=BOUNDS, scale=SCALE),

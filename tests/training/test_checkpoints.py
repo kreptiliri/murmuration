@@ -38,7 +38,6 @@ def a_model(config, seed=0):
 
 
 def nudge(model):
-    """Move every weight, the way one pass of training would."""
     with torch.no_grad():
         for p in model.parameters():
             p.add_(torch.full_like(p, 0.01))
@@ -62,8 +61,6 @@ def tiny_dataset(tmp_path_factory):
 
 def test_a_loaded_model_predicts_exactly_what_the_saved_one_did(tmp_path,
                                                                 config, scalers):
-    """The whole contract in one line. Everything else here is a way of failing
-    this without noticing."""
     xs, ys = scalers
     model = a_model(config)
     model.eval()
@@ -81,7 +78,6 @@ def test_a_loaded_model_predicts_exactly_what_the_saved_one_did(tmp_path,
 
 
 def test_the_pass_number_survives(tmp_path, config, scalers):
-    """It is the x-axis of the headline plot."""
     xs, ys = scalers
     train.save_checkpoint(tmp_path / "c.pt", model=a_model(config),
                           pass_number=137, config=config, x_scaler=xs, y_scaler=ys)
@@ -90,8 +86,6 @@ def test_the_pass_number_survives(tmp_path, config, scalers):
 
 
 def test_both_scalers_survive_exactly(tmp_path, config, scalers):
-    """A checkpoint without the scaler that produced it cannot be fed
-    the data it was trained on, and other data goes in without raising."""
     xs, ys = scalers
     train.save_checkpoint(tmp_path / "c.pt", model=a_model(config), pass_number=0,
                           config=config, x_scaler=xs, y_scaler=ys)
@@ -103,7 +97,6 @@ def test_both_scalers_survive_exactly(tmp_path, config, scalers):
 
 
 def test_the_loaded_model_is_in_eval_mode(tmp_path, config, scalers):
-    """A probe run in training mode is a probe of a different function."""
     xs, ys = scalers
     train.save_checkpoint(tmp_path / "c.pt", model=a_model(config), pass_number=0,
                           config=config, x_scaler=xs, y_scaler=ys)
@@ -112,7 +105,6 @@ def test_the_loaded_model_is_in_eval_mode(tmp_path, config, scalers):
 
 
 def test_the_architecture_is_recorded_not_guessed(tmp_path, config, scalers):
-    """Loading must not depend on the caller knowing what was saved."""
     xs, ys = scalers
     train.save_checkpoint(tmp_path / "c.pt", model=a_model(config), pass_number=0,
                           config=config, x_scaler=xs, y_scaler=ys)
@@ -123,8 +115,6 @@ def test_the_architecture_is_recorded_not_guessed(tmp_path, config, scalers):
 
 
 def test_a_linear_checkpoint_round_trips_too(tmp_path, scalers):
-    """The default model has to survive this as well, or every score already
-    recorded becomes unreproducible from a checkpoint."""
     xs, ys = scalers
     cfg = {"kind": "linear", "context": CONTEXT, "n_features": N_FEATURES,
            "d_model": 128, "n_heads": 4, "n_blocks": 2}
@@ -142,7 +132,6 @@ def test_a_linear_checkpoint_round_trips_too(tmp_path, scalers):
 
 
 def test_a_score_can_ride_along_and_is_optional(tmp_path, config, scalers):
-    """The probe curve is read against how good the model was at that point."""
     xs, ys = scalers
     train.save_checkpoint(tmp_path / "with.pt", model=a_model(config), pass_number=1,
                           config=config, x_scaler=xs, y_scaler=ys, score=0.87)
@@ -157,13 +146,6 @@ def test_a_score_can_ride_along_and_is_optional(tmp_path, config, scalers):
 
 def test_two_checkpoints_of_a_changing_model_are_not_the_same_model(tmp_path,
                                                                     config, scalers):
-    """`state_dict()` hands back tensors that share storage with the live model.
-
-    Save one, train on, save another, and both files can hold the *final*
-    weights. Every probe in the sweep then reads the same model, the readability
-    curve comes out flat, and the flat curve is reported as a finding. Nothing
-    raises anywhere.
-    """
     xs, ys = scalers
     model = a_model(config)
     model.eval()
@@ -185,8 +167,6 @@ def test_two_checkpoints_of_a_changing_model_are_not_the_same_model(tmp_path,
 
 
 def test_the_early_checkpoint_still_holds_its_own_weights(tmp_path, config, scalers):
-    """Not just 'they differ' but 'the early one is
-    still what it was at the time'."""
     xs, ys = scalers
     model = a_model(config)
     model.eval()
@@ -211,14 +191,12 @@ def run(dataset, *extra):
 
 
 def test_no_checkpoints_are_written_by_default(tiny_dataset, tmp_path):
-    """Checkpointing a 1000-pass sweep by accident fills the disk quietly."""
     train.main(run(tiny_dataset, "--checkpoint-dir", str(tmp_path)))
 
     assert list(tmp_path.glob("*.pt")) == []
 
 
 def test_the_interval_is_respected(tiny_dataset, tmp_path):
-    """6 passes every 2 is 3 checkpoints, whatever the off-by-one convention."""
     train.main(run(tiny_dataset, "--checkpoint-every", "2",
                    "--checkpoint-dir", str(tmp_path)))
 
@@ -227,8 +205,6 @@ def test_the_interval_is_respected(tiny_dataset, tmp_path):
 
 
 def test_checkpoints_do_not_overwrite_each_other(tiny_dataset, tmp_path):
-    """One filename for the whole run leaves only the last model, and a plot
-    with one point."""
     train.main(run(tiny_dataset, "--checkpoint-every", "1",
                    "--checkpoint-dir", str(tmp_path)))
 
@@ -236,8 +212,6 @@ def test_checkpoints_do_not_overwrite_each_other(tiny_dataset, tmp_path):
 
 
 def test_the_files_sort_chronologically(tiny_dataset, tmp_path):
-    """A probe sweep globs the directory. `pass_9` before `pass_10` puts the
-    x-axis out of order and the plot still looks plausible."""
     train.main(run(tiny_dataset, "--checkpoint-every", "1",
                    "--checkpoint-dir", str(tmp_path)))
 
@@ -249,8 +223,6 @@ def test_the_files_sort_chronologically(tiny_dataset, tmp_path):
 
 def test_a_checkpoint_from_a_real_run_carries_that_runs_scalers(tiny_dataset,
                                                                 tmp_path):
-    """End to end: the scaler in the file must be the one main() fitted
-    on the training half, not a fresh or default one."""
     train.main(run(tiny_dataset, "--checkpoint-every", "3",
                    "--checkpoint-dir", str(tmp_path)))
 
@@ -263,7 +235,6 @@ def test_a_checkpoint_from_a_real_run_carries_that_runs_scalers(tiny_dataset,
 
 
 def test_a_transformer_run_checkpoints_a_transformer(tiny_dataset, tmp_path):
-    """`--model` and `--checkpoint-every` have to agree with each other."""
     train.main(run(tiny_dataset, "--model", "transformer",
                    "--checkpoint-every", "3", "--checkpoint-dir", str(tmp_path)))
 
@@ -273,10 +244,6 @@ def test_a_transformer_run_checkpoints_a_transformer(tiny_dataset, tmp_path):
 
 
 def test_the_finished_model_is_checkpointed_too(tiny_dataset, tmp_path):
-    """Checkpointing at the top of the pass loop stops one interval short. With
-    `--checkpoint-every 2` over 6 passes the last file is pass 4, and the model
-    that was actually trained, the one every score in the run describes, is not
-    on disk anywhere."""
     train.main(run(tiny_dataset, "--checkpoint-every", "2",
                    "--checkpoint-dir", str(tmp_path)))
 

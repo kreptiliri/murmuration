@@ -63,7 +63,6 @@ def test_rel_per_bird_builds_the_one_in_flocker():
 
 
 def test_per_bird_is_still_the_old_model():
-    """Every per-bird score already recorded was the old model."""
     model = train.build_model(context=2, n_features=24, kind="per_bird")
     assert isinstance(model, flocker.PerBirdTransformer)
     assert not isinstance(model, flocker.RelPerBirdTransformer)
@@ -96,8 +95,6 @@ def test_context_1_is_refused(tiny_dataset):
 
 
 def test_it_uses_the_shared_scaler(tiny_dataset, monkeypatch):
-    """One scaler for every bird, as for per_bird. A per-slot scaler gives
-    slot 3 an identity bird 3 never had, which the model is built not to have."""
     calls = recording(monkeypatch, "shared_squasher")
     train.main(flags(tiny_dataset))
     assert len(calls) == 2
@@ -105,8 +102,6 @@ def test_it_uses_the_shared_scaler(tiny_dataset, monkeypatch):
 
 @pytest.fixture(scope="module")
 def odd_world(tmp_path_factory):
-    """A world 90 wide with a separation radius of 15, so a hardcoded 100 or
-    20 cannot pass by being right about the shipped world."""
     import sys
     from dataclasses import replace
     from pathlib import Path
@@ -122,8 +117,6 @@ def odd_world(tmp_path_factory):
 
 
 def test_the_geometry_uses_the_datasets_bounds_and_the_separation_radius(odd_world, monkeypatch):
-    """Read from config.json, like dt and the speeds. A hardcoded 100 is right
-    today and wrong for the first dataset in a different world."""
     calls = recording(monkeypatch, "pair_geometry")
     train.main(flags(odd_world, "--symmetries"))
     assert calls, "pair_geometry was never called"
@@ -133,10 +126,6 @@ def test_the_geometry_uses_the_datasets_bounds_and_the_separation_radius(odd_wor
 
 
 def test_the_geometry_comes_from_the_same_window_as_the_moves(tiny_dataset, monkeypatch):
-    """With both augmentations on. Computing the geometry from the window
-    before it was relabelled or turned pairs one flock's moves with another
-    flock's layout. Training runs, the loss falls, and the model learns
-    nothing about neighbours."""
     moves = recording(monkeypatch, "to_moves")
     geo = recording(monkeypatch, "pair_geometry")
     train.main(flags(tiny_dataset, "--augment", "--symmetries"))
@@ -158,23 +147,18 @@ def test_the_held_out_windows_get_their_own_geometry(tiny_dataset, monkeypatch):
 # --- --symmetries ---------------------------------------------------------------------------
 
 def test_without_the_flag_nothing_is_turned(tiny_dataset, monkeypatch):
-    """Every score already recorded was trained unturned."""
     calls = recording(monkeypatch, "symmetry_augment")
     train.main(flags(tiny_dataset))
     assert calls == []
 
 
 def test_with_the_flag_every_learn_batch_is_turned_and_nothing_else(tiny_dataset, monkeypatch):
-    """Once per batch of the learn windows. Turning the held-out windows
-    changes the exam, not the training."""
     calls = recording(monkeypatch, "symmetry_augment")
     train.main(flags(tiny_dataset, "--symmetries"))
     assert len(calls) == learn_batches(tiny_dataset)
 
 
 def test_it_turns_raw_windows_in_world_units(tiny_dataset, monkeypatch):
-    """Before to_moves and before the scaler, like --augment. Turning scaled
-    numbers rotates x into y after they were divided by different numbers."""
     calls = recording(monkeypatch, "symmetry_augment")
     train.main(flags(tiny_dataset, "--symmetries"))
     for args, _ in calls:
@@ -188,7 +172,6 @@ def test_it_turns_in_the_datasets_world(odd_world, monkeypatch):
 
 
 def test_symmetries_work_for_the_old_per_bird_model_too(tiny_dataset, capsys):
-    """A training flag, not a model flag."""
     argv = flags(tiny_dataset, "--symmetries")
     argv[argv.index("rel_per_bird")] = "per_bird"
     assert train.main(argv) == 0
@@ -197,7 +180,6 @@ def test_symmetries_work_for_the_old_per_bird_model_too(tiny_dataset, capsys):
 # --- checkpoints ----------------------------------------------------------------------------
 
 def test_its_checkpoint_loads_back_as_the_same_model(tiny_dataset, tmp_path):
-    """Step 7 reads checkpoints, not live models."""
     train.main(flags(tiny_dataset, "--checkpoint-every", "1", "--checkpoint-dir", str(tmp_path)))
     loaded = train.load_checkpoint(tmp_path / "pass_0001.pt")
     assert isinstance(loaded["model"], flocker.RelPerBirdTransformer)

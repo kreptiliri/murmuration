@@ -25,7 +25,6 @@ def x():
 
 
 def test_a_window_becomes_one_tick_of_prediction(transformer, x):
-    """Whole window in, 24 numbers out - the same contract as the Linear."""
     assert transformer(x).shape == (BATCH, N_FEATURES)
 
 
@@ -36,12 +35,6 @@ def test_a_shorter_window_is_fine(transformer):
 
 
 def test_the_blocks_actually_stack(transformer):
-    """A plain list instead of ModuleList hides the blocks from parameters().
-
-    The model still runs and still uses them; the optimiser simply never sees
-    them, so most of the network never learns. It looks like a model that
-    trains badly rather than one that is wired wrong.
-    """
     torch.manual_seed(0)
     one = flocker.Transformer(**{**SMALL, "n_blocks": 1})
 
@@ -50,7 +43,6 @@ def test_the_blocks_actually_stack(transformer):
 
 
 def test_the_default_configuration_is_within_the_design_budget():
-    """The design budget: d_model 128-256, 4 heads, ~10^5-10^6 parameters."""
     torch.manual_seed(0)
     model = flocker.Transformer(n_features=N_FEATURES, d_model=128, n_heads=4,
                                 n_blocks=2, max_context=CONTEXT)
@@ -61,7 +53,6 @@ def test_the_default_configuration_is_within_the_design_budget():
 
 
 def test_it_can_memorise_eight_windows():
-    """The wiring check. Run this before any long run, not after."""
     torch.manual_seed(0)
     inputs = torch.randn(8, CONTEXT, N_FEATURES)
     targets = torch.randn(8, N_FEATURES)
@@ -90,7 +81,6 @@ def test_every_parameter_gets_a_gradient(transformer, x):
 
 
 def test_two_built_under_the_same_seed_are_identical():
-    """A timing number and a score both need the run to be repeatable."""
     torch.manual_seed(7)
     first = flocker.Transformer(**SMALL)
     torch.manual_seed(7)
@@ -101,16 +91,6 @@ def test_two_built_under_the_same_seed_are_identical():
 
 
 def test_every_tick_in_the_window_reaches_the_output(transformer, x):
-    """Pins which position the head reads, which nothing else here does.
-
-    Reading `x[:, 0]` instead of `x[:, -1]` survives every other test in this
-    file - eight random windows are still memorisable from their first ticks
-    alone - while throwing away seven eighths of the input. The model would
-    train, converge, and read as "the transformer is not very good".
-
-    With a causal mask only the last position has seen the whole window, so a
-    change anywhere in it must be able to move the output.
-    """
     before = transformer(x)
 
     for tick in range(CONTEXT):

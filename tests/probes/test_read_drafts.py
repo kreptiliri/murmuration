@@ -72,9 +72,6 @@ def test_it_does_not_change_the_windows(run):
 # --- the pages are the model's real drafts ----------------------------------------------
 
 def test_each_page_is_that_birds_draft_in_that_window(run):
-    """Row w * n_birds + b is bird b in window w, the same order the force labels
-    come in once they are reshaped. Windows past the first batch are checked
-    too, so reading in batches cannot shuffle or drop anything."""
     _, _, ck, x = run
     part = x
     pages = probe.read_drafts(ck, part, physics=PHYSICS)
@@ -87,9 +84,6 @@ def test_each_page_is_that_birds_draft_in_that_window(run):
 
 
 def test_bird_bs_own_move_can_be_read_off_bird_bs_page(run):
-    """Draft 0 is a straight-line copy of each bird's own move, so a probe reads
-    that move back perfectly, but only if row b really is bird b. If the rows
-    were mixed up between birds, this falls apart."""
     _, _, ck, x = run
     pages = probe.read_drafts(ck, x, physics=PHYSICS)[0]
     own_moves = (x[:, 1] - x[:, 0]).reshape(len(x) * N_BIRDS, 2)
@@ -99,9 +93,6 @@ def test_bird_bs_own_move_can_be_read_off_bird_bs_page(run):
 
 
 def test_the_pages_line_up_with_the_force_labels(run):
-    """The whole reason for the row order. Separation needs the neighbours, so it
-    is not on draft 0 in a straight line, but whatever score a probe gets, it
-    has to be for bird b's push read off bird b's page."""
     data, _, ck, x = run
     labels = windows.build_force_labels(data, context=2, clips=range(10))
     pages = probe.read_drafts(ck, x, physics=PHYSICS)
@@ -110,8 +101,6 @@ def test_the_pages_line_up_with_the_force_labels(run):
 
 
 def test_it_refuses_a_model_without_drafts(run, tmp_path):
-    """Only the relative model has hidden_states. Anything else should say so,
-    not fail somewhere inside torch."""
     data, _, _, x = run
     train.main(["--data", str(data), "--clips", "10", "--context", "2", "--passes", "1",
                 "--batch", "64", "--report-every", "0", "--model", "per_bird",

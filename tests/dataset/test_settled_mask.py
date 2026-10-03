@@ -76,8 +76,6 @@ def test_it_follows_the_rule_by_hand(dataset):
 # --- the edge cases, one clip each ----------------------------------------------
 
 def test_a_clip_that_never_settles_has_no_settled_window(dataset):
-    """settle_tick is -1 there, and every tick is >= -1. Comparing ticks without
-    checking for -1 first marks the whole clip settled, and nothing raises."""
     mask = windows.settled_mask(dataset, context=CONTEXT)
 
     assert not clip_rows(mask, 0).any()
@@ -90,9 +88,6 @@ def test_a_clip_settled_from_the_first_state_is_settled_throughout(dataset):
 
 
 def test_the_boundary_is_the_last_input_state(dataset):
-    """settle_tick 10, context 3: window 7 is fed states 7-9 and window 8 states
-    8-10. Reading the first input state instead moves the switch to window 10;
-    reading the target state moves it to window 7."""
     rows = clip_rows(windows.settled_mask(dataset, context=CONTEXT), 2)
 
     assert not rows[7], "window 7 is fed states 7-9, all before settling"
@@ -101,7 +96,6 @@ def test_the_boundary_is_the_last_input_state(dataset):
 
 
 def test_settling_on_the_final_state_settles_no_window(dataset):
-    """The final state is only ever a target, never an input."""
     mask = windows.settled_mask(dataset, context=CONTEXT)
 
     assert not clip_rows(mask, 3).any()

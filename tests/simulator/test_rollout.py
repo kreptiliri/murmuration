@@ -10,13 +10,6 @@ N_BIRDS = 20
 
 
 def test_no_nan_ever_appears():
-    """The failure this whole project is most exposed to.
-
-    A NaN in a force is not an error - it propagates into the velocity, then
-    the position, then every subsequent tick, and the run completes. The
-    dataset would be written, the model would train on it, and the labels
-    would be garbage from some arbitrary tick onwards.
-    """
     positions, velocities = random_flock(seed=0, n_birds=N_BIRDS)
 
     for tick in range(TICKS):
@@ -28,12 +21,6 @@ def test_no_nan_ever_appears():
 
 
 def test_positions_stay_inside_the_world_for_every_tick():
-    """`pos %= bounds` every tick is the invariant get_torus depends on.
-
-    If a position ever escapes [0, bounds), the minimum-image convention
-    silently starts returning the wrong displacement and every rule that uses
-    it is computed against a world that has come apart.
-    """
     positions, velocities = random_flock(seed=1, n_birds=N_BIRDS)
 
     for tick in range(TICKS):
@@ -54,11 +41,6 @@ def test_speed_never_exceeds_the_cap():
 
 
 def _assert_reconstruction_holds(physics, seed, ticks=TICKS):
-    """Run a flock forwards, re-deriving every velocity from recorded forces.
-
-    Returns the number of ticks on which the speed cap actually engaged, so
-    the caller can guard its own premise.
-    """
     positions, velocities = random_flock(seed=seed, n_birds=N_BIRDS)
     ticks_where_the_cap_fired = 0
 
@@ -82,28 +64,10 @@ def _assert_reconstruction_holds(physics, seed, ticks=TICKS):
 
 
 def test_the_reconstruction_invariant_holds_on_every_tick():
-    """The load-bearing test of this project, run forwards.
-
-    The single-tick version proves the recorded forces reproduce one velocity
-    update in a hand-built world. This proves it for every bird on every one
-    of two hundred ticks of a real flock - through seam crossings, through
-    birds that lose all their neighbours, through the whole settling process.
-
-    If this ever fails, the numbers in the forces dict are not labels for this
-    simulation, and every probe and ablation result downstream is fitted to
-    something that never happened.
-    """
     _assert_reconstruction_holds(PHYSICS, seed=3)
 
 
 def test_the_reconstruction_invariant_holds_when_the_cap_fires_constantly():
-    """The same invariant in the regime where forces do not simply sum.
-
-    Once the speed cap engages, the relationship is cap(v + sum(f)*dt) == v',
-    not v + sum(f)*dt == v'. A settled flock almost never reaches its cap -
-    measured, 1 tick in 200 - so an ordinary rollout barely tests this at all.
-    Strong separation against a low cap saturates it on every single tick.
-    """
     physics = replace(PHYSICS, max_speed=0.3, w_sep=5.0)
 
     ticks_where_the_cap_fired = _assert_reconstruction_holds(physics, seed=3)
@@ -115,13 +79,6 @@ def test_the_reconstruction_invariant_holds_when_the_cap_fires_constantly():
 
 
 def test_the_flock_settles_rather_than_being_pinned_at_the_cap():
-    """A flock that has found its shape should be moving gently, not flat out.
-
-    If the integrator pumped energy in - which plain forward Euler does to a
-    spring force like cohesion - every bird would end up saturated at the
-    speed cap and stay there. Measured: mean speed falls from ~3.7 to ~0.6 and
-    the fraction of birds at the cap goes to zero.
-    """
     positions, velocities = random_flock(seed=4, n_birds=N_BIRDS)
     for _ in range(TICKS):
         positions, velocities, _ = step(positions, velocities, PHYSICS)
@@ -136,14 +93,6 @@ def test_the_flock_settles_rather_than_being_pinned_at_the_cap():
 
 
 def test_the_cohesion_spring_does_not_gain_energy():
-    """Cohesion is Hooke's law, and springs are where integrators go wrong.
-
-    Two birds, cohesion only, oscillating about their shared centre of mass.
-    Under plain forward Euler the amplitude would grow every period until the
-    speed cap took over. It does not, because step() advances position using
-    the *new* velocity - semi-implicit (symplectic) Euler - which conserves
-    energy for oscillators. That one line is load-bearing and this pins it.
-    """
     physics = replace(PHYSICS, w_sep=0.0, w_ali=0.0, w_coh=1.0)
     positions = np.array([[45.0, 50.0], [55.0, 50.0]])
     velocities = np.zeros((2, 2))
@@ -167,12 +116,6 @@ def test_the_cohesion_spring_does_not_gain_energy():
 
 
 def test_a_rollout_is_reproducible():
-    """Same seed, same physics, identical trajectory - bit for bit.
-
-    Without this the dataset cannot be regenerated from its own metadata, and
-    a checkpoint sweep cannot be compared against a rerun of the world it was
-    trained on.
-    """
     first_positions, first_velocities = random_flock(seed=5, n_birds=10)
     second_positions, second_velocities = random_flock(seed=5, n_birds=10)
 
@@ -189,13 +132,6 @@ def test_a_rollout_is_reproducible():
 
 
 def test_two_birds_beyond_every_radius_just_drift():
-    """No neighbours, no forces, pure translation.
-
-    The two birds here are 70.7 units apart on the torus, outside all three
-    radii. Their velocities must not change at all, and their positions must
-    advance by exactly v*dt each tick. Any drift means a rule is firing when
-    nothing is in range.
-    """
     positions = np.array([[10.0, 10.0], [60.0, 60.0]])
     velocities = np.array([[1.0, 0.5], [-2.0, 0.0]])
     starting_velocities = velocities.copy()
@@ -212,23 +148,10 @@ def test_two_birds_beyond_every_radius_just_drift():
 
 
 def test_the_reconstruction_invariant_holds_with_the_speed_floor():
-    """The load-bearing invariant under the new clamp.
-
-    Adding the floor changed the function on the outside of
-    `clamp(v + sum(f)*dt) == v'`. The recorded forces must still reproduce the
-    update, on every bird on every tick, with the floor engaged.
-    """
     _assert_reconstruction_holds(PHYSICS_CRUISING, seed=3)
 
 
 def test_a_cruising_flock_keeps_moving():
-    """Why the floor exists at all.
-
-    Without it, alignment steers each bird toward its neighbours' mean
-    *vector*, and the mean of scattered vectors is short - so the flock
-    organises its headings and brakes to a crawl in the same motion. Measured
-    without the floor: mean speed falls to about 0.27 and stays there.
-    """
     positions, velocities = random_flock(seed=0, n_birds=N_BIRDS)
     for _ in range(TICKS):
         positions, velocities, _ = step(positions, velocities, PHYSICS_CRUISING)
@@ -248,17 +171,6 @@ def test_a_cruising_flock_keeps_moving():
 
 
 def test_speed_stays_between_the_floor_and_the_cap_on_every_tick():
-    """The screenshot, as an assertion.
-
-    Random headings, 500 ticks, floor engaged: every bird must sit inside
-    [min_speed, max_speed] at every single tick, not merely at the end. The
-    picture shows this as every arrow being the same length from tick 25
-    onwards; this is that claim in a form that fails loudly.
-
-    It would also catch a bird stalling to exactly zero, which the floor cannot
-    rescue because a zero vector has no direction - measured to happen only in
-    flocks too small to be flocks, and this pins that it stays that way.
-    """
     physics = PHYSICS_CRUISING
     positions, velocities = random_flock(seed=11, n_birds=N_BIRDS)
     floor_engaged = 0
@@ -283,14 +195,6 @@ def test_speed_stays_between_the_floor_and_the_cap_on_every_tick():
 
 
 def test_the_shipped_defaults_produce_a_sane_rollout():
-    """Physics() with no arguments is what a careless caller gets.
-
-    Since world.py began deriving from Physics() this is nearly what
-    PHYSICS_CRUISING already is, so the gap this test was written to cover has
-    mostly closed. It stays because it constructs Physics() literally: if a
-    future default were changed without world.py being re-read, this is the
-    test that runs against the new value rather than a remembered one.
-    """
     physics = Physics()
     positions, velocities = random_flock(seed=13, n_birds=N_BIRDS)
 

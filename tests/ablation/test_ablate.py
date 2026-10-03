@@ -60,8 +60,6 @@ def test_it_answers_in_the_same_shape_as_the_model():
 
 
 def test_it_does_not_change_the_model():
-    """The trained weights are the experiment's control. Switching a step off
-    for one call must leave the real model exactly as it was."""
     model = small_model(2)
     x, pair = fake_input(1)
     before = {name: value.clone() for name, value in model.state_dict().items()}
@@ -83,8 +81,6 @@ def test_it_refuses_a_block_that_does_not_exist():
 
 
 def test_the_limit_comes_from_the_model_not_a_fixed_number():
-    """A one-block model has only block 0. Asking for block 1 would switch
-    nothing off and run the normal model without a word."""
     model = small_model(1)
     x, pair = fake_input(1)
     with pytest.raises(ValueError):
@@ -94,9 +90,6 @@ def test_the_limit_comes_from_the_model_not_a_fixed_number():
 # --- ablated_forward: exactly the listening is replaced, nothing else ---------------------
 
 def test_the_last_block_listens_to_nothing_and_still_thinks():
-    """Block 1 switched off by hand: the draft coming in (draft 1) gets the note
-    instead of what the neighbours said, then the thinking line runs as normal,
-    then the head reads it."""
     model = small_model(2)
     x, pair = fake_input(3)
     fixed = note(4)
@@ -108,8 +101,6 @@ def test_the_last_block_listens_to_nothing_and_still_thinks():
 
 
 def test_the_first_block_switched_off_and_the_second_still_listens():
-    """Block 0 switched off, block 1 untouched: the blocks after the switched
-    off one run normally, pair and all."""
     model = small_model(2)
     x, pair = fake_input(5)
     fixed = note(6)
@@ -123,9 +114,6 @@ def test_the_first_block_switched_off_and_the_second_still_listens():
 
 
 def test_if_the_listening_already_wrote_nothing_switching_it_off_changes_nothing():
-    """A block whose listening output is always zero, switched off with a zero
-    note, is the same model. If this fails, something besides the listening
-    line was changed."""
     model = small_model(2)
     for block in model.blocks:
         torch.nn.init.zeros_(block.attention.proj.weight)
@@ -149,9 +137,6 @@ def test_the_note_is_used():
 # --- ablated_forward: what switching off means for the birds -------------------------------
 
 def test_with_the_only_block_switched_off_a_bird_cannot_hear_its_neighbours():
-    """The point of the whole experiment. One block, its listening replaced by
-    a fixed note: bird 0's answer must not move when every other bird's moves
-    and every distance change."""
     model = small_model(1)
     x, pair = fake_input(11)
     changed_x = x.clone()
@@ -164,8 +149,6 @@ def test_with_the_only_block_switched_off_a_bird_cannot_hear_its_neighbours():
 
 
 def test_with_one_of_two_blocks_switched_off_a_bird_still_hears_through_the_other():
-    """Only one round goes quiet. The other still listens, so the neighbours
-    still reach bird 0. If this fails, both rounds were switched off."""
     model = small_model(2)
     x, pair = fake_input(13)
     changed_x = x.clone()
@@ -214,7 +197,6 @@ def test_the_note_is_one_number_per_box(run):
 
 
 def test_the_note_is_the_average_over_every_bird_in_every_window(run):
-    """More than 256 windows, so reading in batches is covered too."""
     _, ck, x = run
     assert len(x) > 256
     for k in range(2):
@@ -224,9 +206,6 @@ def test_the_note_is_the_average_over_every_bird_in_every_window(run):
 
 
 def test_a_short_last_batch_counts_as_much_as_a_full_one_per_window(run):
-    """300 windows is a batch of 256 and a batch of 44. The average of the two
-    batch averages would count each of the 44 windows about six times as much
-    as the others. The right note weighs every window the same."""
     _, ck, x = run
     part = x[:300]
     expected = listening_by_hand(ck, part, 1).mean(dim=0)
@@ -235,8 +214,6 @@ def test_a_short_last_batch_counts_as_much_as_a_full_one_per_window(run):
 
 
 def test_the_note_comes_from_the_windows_it_is_given(run):
-    """The note is fitted on the learn clips and the damage scored on the check
-    clips, so it has to depend on which windows go in."""
     _, ck, x = run
     first = ablate.average_listening(ck, x[:100], physics=PHYSICS, block=1)
     last = ablate.average_listening(ck, x[-100:], physics=PHYSICS, block=1)
@@ -292,8 +269,6 @@ def test_self_listening_is_one_note_per_bird():
 
 
 def test_with_one_bird_self_listening_is_the_normal_listening():
-    """A bird alone has nobody else to hear, so the real attention already puts
-    all its weight on itself. The two have to agree exactly there."""
     model = small_model(2)
     draft, pair = torch.randn(5, 1, D_MODEL), torch.randn(5, 1, 1, 3)
     attention = model.blocks[1].attention
@@ -302,8 +277,6 @@ def test_with_one_bird_self_listening_is_the_normal_listening():
 
 
 def test_self_listening_does_not_hear_the_neighbours():
-    """Bird 0's note must not move when every other bird's draft changes and
-    every distance except its own (bird 0 to bird 0) changes."""
     model = small_model(2)
     draft, pair = torch.randn(5, N_BIRDS, D_MODEL), torch.randn(5, N_BIRDS, N_BIRDS, 3)
     changed_draft = draft.clone()
@@ -334,8 +307,6 @@ def test_self_listening_still_hears_its_own_draft_and_its_own_place():
 
 
 def test_note_self_is_the_listening_line_with_only_yourself():
-    """Block 1 switched off with note="self": the listening line runs, but
-    each bird hears only itself, then the thinking line and the head as usual."""
     model = small_model(2)
     x, pair = fake_input(15)
     block = model.blocks[1]
@@ -377,9 +348,6 @@ def test_a_note_named_anything_else_is_refused():
 
 
 def test_every_bird_hears_its_own_place_and_no_one_elses():
-    """Checked for every bird, not just bird 0: changing every distance except
-    the diagonal (each bird to itself) changes nobody's note, and changing
-    one bird's own place changes that bird's note."""
     model = small_model(2)
     draft, pair = torch.randn(5, N_BIRDS, D_MODEL), torch.randn(5, N_BIRDS, N_BIRDS, 3)
     attention = model.blocks[0].attention

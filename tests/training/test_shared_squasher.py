@@ -55,7 +55,6 @@ def is_pooled(stat):
 # --- the function ----------------------------------------------------------------
 
 def test_it_returns_what_squasher_returns_in_shape():
-    """apply_squash and cancel_squash take either scaler without changing."""
     values = uneven_windows(np.random.default_rng(0))
 
     for got, per_slot in zip(train.shared_squasher(values), train.squasher(values)):
@@ -73,8 +72,6 @@ def test_the_statistics_are_pooled_over_the_birds():
 
 
 def test_every_bird_gets_the_same_ruler():
-    """The whole point. Two birds at the same spot must scale to the same
-    numbers, or a model with one set of weights for every bird sees them apart."""
     mean, std = train.shared_squasher(uneven_windows(np.random.default_rng(2)))
 
     assert is_pooled(mean), "the mean differs between bird slots"
@@ -82,9 +79,6 @@ def test_every_bird_gets_the_same_ruler():
 
 
 def test_x_and_y_keep_their_own_ruler():
-    """Columns run x0 y0 x1 y1 ... . Spreading the pooled pair back with
-    np.repeat instead of np.tile gives x x x ... y y y, which raises nothing and
-    divides half the birds' x by the y ruler."""
     mean, std = train.shared_squasher(uneven_windows(np.random.default_rng(3)))
 
     for stat, name in ((mean, "mean"), (std, "std")):
@@ -94,9 +88,6 @@ def test_x_and_y_keep_their_own_ruler():
 
 
 def test_each_tick_keeps_its_own_ruler():
-    """Tick 0 of a window is where each bird is, tens of units. The later ticks
-    are moves of a few tenths. One ruler over both flattens the moves to
-    nothing."""
     mean, std = train.shared_squasher(uneven_windows(np.random.default_rng(4)))
 
     assert abs(mean[0, 0] - mean[1, 0]) > 10.0, "tick 0 and tick 1 share a mean"
@@ -104,7 +95,6 @@ def test_each_tick_keeps_its_own_ruler():
 
 
 def test_a_one_tick_target_is_pooled_too():
-    """The target is (rows, 24), with no tick axis."""
     rng = np.random.default_rng(5)
     targets = uneven_windows(rng, context=1)[:, 0]
     expected_mean, expected_std = pooled_by_hand(targets)
@@ -117,7 +107,6 @@ def test_a_one_tick_target_is_pooled_too():
 
 
 def test_the_number_of_birds_comes_from_the_width():
-    """The training tests run on 4 birds, the real data on 12."""
     values = np.random.default_rng(6).normal(size=(50, 2, 8))
     expected_mean, _ = pooled_by_hand(values)
 
@@ -197,10 +186,6 @@ def checkpoint_of(dataset, model, tmp_path, *extra):
 
 @pytest.mark.parametrize("residual", ["none", "clamped"])
 def test_a_per_bird_run_fits_both_scalers_pooled(tiny_dataset, tmp_path, residual):
-    """Checked through the checkpoint, which is also what the probes will load.
-    The target scaler has to be pooled as well: the model's one head gives every
-    bird's answer in the same units, and a per-slot target scaler would turn
-    them back into world units with twelve different rulers."""
     moves, target = learn_split(tiny_dataset, residual)
 
     got = checkpoint_of(tiny_dataset, "per_bird", tmp_path, "--residual", residual)
@@ -217,8 +202,6 @@ def test_a_per_bird_run_fits_both_scalers_pooled(tiny_dataset, tmp_path, residua
 @pytest.mark.parametrize("model", ["linear", "transformer"])
 def test_the_other_two_models_keep_the_per_slot_scaler_exactly(tiny_dataset,
                                                                tmp_path, model):
-    """Every score recorded so far was measured with the per-slot scaler. Bit
-    for bit, or none of them reproduce."""
     moves, target = learn_split(tiny_dataset)
 
     got = checkpoint_of(tiny_dataset, model, tmp_path)
@@ -243,9 +226,6 @@ def test_the_other_two_models_never_call_it(tiny_dataset, monkeypatch, model):
 
 
 def test_every_batch_is_scaled_with_the_pooled_scaler(tiny_dataset, monkeypatch):
-    """The loop rescales every batch. Fitting the pooled scaler before the loop
-    into new names, while the loop still reads the per-slot ones, trains on one
-    ruler and scores on the other, and nothing raises."""
     seen = []
     real = train.apply_squash
     monkeypatch.setattr(train, "apply_squash",
@@ -274,7 +254,6 @@ def test_the_score_is_unscaled_with_the_pooled_target_scaler(tiny_dataset, monke
 
 
 def test_it_never_sees_the_held_out_clips(tiny_dataset, monkeypatch):
-    """The same leak the per-slot scaler is guarded against."""
     seen = []
     real = train.shared_squasher
     monkeypatch.setattr(train, "shared_squasher",

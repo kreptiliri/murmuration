@@ -24,17 +24,10 @@ def x():
 
 
 def test_it_comes_back_the_same_shape(block, x):
-    """A block has to fit where its own output goes next."""
     assert block(x).shape == x.shape
 
 
 def test_the_residual_is_real(block, x):
-    """Silence both sublayers and the block must hand back its input untouched.
-
-    Zeroing the last weight of attention and of the feed-forward makes both
-    return exactly 0, so `x + 0 + 0` is the only thing left. If the output is
-    anything other than x, the input is not being added back.
-    """
     with torch.no_grad():
         block.attention.proj.weight.zero_()
         block.feedforward.narrow.weight.zero_()
@@ -44,7 +37,6 @@ def test_the_residual_is_real(block, x):
 
 
 def test_a_tick_still_cannot_see_the_future(block, x):
-    """The mask is right inside attention; this checks the wrapping kept it."""
     before = block(x)
 
     tampered = x.clone()
@@ -55,7 +47,6 @@ def test_a_tick_still_cannot_see_the_future(block, x):
 
 
 def test_every_parameter_gets_a_gradient(block, x):
-    """Catches a sublayer built as a local instead of onto self."""
     block(x).sum().backward()
 
     for name, parameter in block.named_parameters():
@@ -67,18 +58,6 @@ def test_two_calls_agree(block, x):
 
 
 def test_the_whole_block_matches_pytorchs_own(block, x):
-    """The reference check, extended from attention to the whole block.
-
-    test_attention.py verifies the attention maths against PyTorch. This
-    verifies everything wrapped around it: that the norms are applied BEFORE
-    the sublayers rather than after, that the residuals add the pre-norm input
-    rather than the normed one, and that the feed-forward sits in the right
-    place with the right width.
-
-    Rebuilds this block as `torch.nn.TransformerEncoderLayer(norm_first=True)`
-    with the same weights and demands agreement. Post-norm instead of pre-norm
-    trains and is a different architecture; nothing else here would notice.
-    """
     reference = torch.nn.TransformerEncoderLayer(
         d_model=D_MODEL, nhead=N_HEADS, dim_feedforward=4 * D_MODEL,
         activation="gelu", dropout=0.0, batch_first=True, norm_first=True)

@@ -9,13 +9,6 @@ from world import (BOUNDS, DT, MAX_SPEED, MIN_SPEED, PHYSICS,
 
 
 def _reconstruct_velocity(velocities, forces, boid_id, physics):
-    """Re-derive one bird's new velocity from the RECORDED forces alone.
-
-    This is the whole point of the exercise: if the numbers stored in the
-    forces dict cannot reproduce the velocity update the simulator actually
-    performed, then those numbers are not labels for this simulation, and
-    every probe trained on them is fitting something that never happened.
-    """
     total = (forces["separation"][boid_id]
              + forces["alignment"][boid_id]
              + forces["cohesion"][boid_id])
@@ -23,7 +16,6 @@ def _reconstruct_velocity(velocities, forces, boid_id, physics):
                            physics.max_speed, physics.min_speed)
 
 def test_recorded_forces_reconstruct_the_velocity_update():
-    """The uncapped case: recorded forces sum straight to the velocity change."""
     positions = np.array([[10.0, 10.0],
                           [15.0, 10.0],
                           [80.0, 80.0]])
@@ -48,14 +40,6 @@ def test_recorded_forces_reconstruct_the_velocity_update():
         )
 
 def test_reconstruction_holds_when_the_speed_cap_fires():
-    """The case that actually matters.
-
-    Once the cap engages, recorded forces no longer sum to the velocity
-    change - the relationship is `cap(v_old + sum(f) * dt) == v_new`, not a
-    plain sum. A reconstruction test that never trips the cap verifies only
-    the easy half and would pass against a simulator whose labels are wrong
-    in exactly the regime where birds are moving fastest.
-    """
     physics = replace(PHYSICS, max_speed=0.5)  # every bird below exceeds it
     positions = np.array([[10.0, 10.0],
                           [15.0, 10.0],
@@ -86,11 +70,6 @@ def test_reconstruction_holds_when_the_speed_cap_fires():
         assert np.linalg.norm(new_velocities[i]) <= physics.max_speed + 1e-12
 
 def test_positions_stay_inside_the_world():
-    """`pos %= bounds` every tick is the invariant get_torus depends on.
-
-    Both birds start within half a step of an edge and are moving straight at
-    it, so each must wrap round rather than leaving the box.
-    """
     positions = np.array([[99.9, 50.0],
                           [50.0, 99.9]])
     velocities = np.array([[10.0, 0.0],
@@ -105,17 +84,6 @@ def test_positions_stay_inside_the_world():
     assert new_positions[1][1] < 1.0, "bird 1 should have crossed the y seam"
 
 def test_step_reads_the_separation_weight():
-    """`w_sep` must scale the recorded force, and proportionally.
-
-    Deleting `* w_sep` from `step` passed all twenty of the tests above. The
-    weights are not decoration - unequal weights are the lever that spreads
-    the three rules' acquisition times apart, so a silently
-    ignored weight does not crash anything, it just deletes the experiment's
-    independent variable.
-
-    This asserts the ratio rather than a hardcoded 1.5, so retuning the
-    weights later does not turn this into a false alarm.
-    """
     positions = np.array([[10.0, 50.0],
                           [15.0, 50.0]])
     velocities = np.zeros((2, 2))
@@ -132,13 +100,6 @@ def test_step_reads_the_separation_weight():
                                2.0 * forces_1x["separation"][0])
 
 def test_step_reads_the_separation_force_cap():
-    """`sep_force_cap` must reach `calculate_separation`.
-
-    A parameter that `step` accepts and then drops is invisible: the callee's
-    default silently sets the physics, the top-level config that gets recorded
-    alongside the dataset says nothing about it, and the run is not
-    reproducible from its own metadata.
-    """
     positions = np.array([[10.0, 50.0],
                           [10.5, 50.0]])   # d = 0.5, uncapped magnitude 2.0
     velocities = np.zeros((2, 2))
@@ -165,12 +126,6 @@ def test_step_reads_the_alignment_weight():
                                2.0 * forces_1x["alignment"][0])
 
 def test_step_reads_the_alignment_radius():
-    """The same pair of birds, neighbours under one radius and not the other.
-
-    The wide case is PHYSICS itself rather than a hardcoded radius, so this
-    tests the configured value rather than an arbitrary number that happens to
-    exceed 25.
-    """
     positions = np.array([[50.0, 50.0],
                           [75.0, 50.0]])   # d = 25, inside the configured 30
     velocities = np.array([[1.0, 0.0],
@@ -183,14 +138,6 @@ def test_step_reads_the_alignment_radius():
     np.testing.assert_allclose(narrow["alignment"][0], [0.0, 0.0])
 
 def test_positions_wrap_the_lower_seam():
-    """Crossing x = 0 travelling in -x.
-
-    The suite already covers the upper seam (99.9 -> 0.4). The lower one
-    relies on Python's modulo returning a non-negative result for a positive
-    modulus - which is a language guarantee, not a universal one; C's fmod
-    would leave -0.4 here. `get_torus` assumes every position lives in
-    [0, bounds), so that assumption is worth pinning.
-    """
     positions = np.array([[0.1, 50.0]])
     velocities = np.array([[-10.0, 0.0]])   # capped to -5.0, so -0.5 per tick
 
@@ -200,15 +147,6 @@ def test_positions_wrap_the_lower_seam():
     assert np.all(new_positions >= 0.0)
 
 def test_step_does_not_mutate_its_inputs():
-    """Double-buffering: every force for tick t comes from the state at t.
-
-    `step` currently builds fresh arrays, so this passes today. It is here
-    because the obvious optimisation later - doing `positions %= bounds` in
-    place instead of allocating - would compute some birds' forces against a
-    half-updated world. The forces would still be internally consistent, so
-    the reconstruction test would keep passing while the labels described a
-    world that never existed.
-    """
     positions = np.array([[10.0, 10.0],
                           [15.0, 10.0]])
     velocities = np.array([[1.0, 0.0],
@@ -236,7 +174,6 @@ def test_step_reads_the_cohesion_weight():
 
 
 def test_step_reads_the_cohesion_radius():
-    """The same pair of birds, inside one radius and outside the other."""
     positions = np.array([[50.0, 50.0],
                           [80.0, 50.0]])   # 30 apart
     velocities = np.zeros((2, 2))
@@ -251,12 +188,6 @@ def test_step_reads_the_cohesion_radius():
 
 
 def test_step_records_all_three_rules_separately():
-    """The forces dict is the label set. Each key must carry its own rule.
-
-    A world arranged so that all three rules fire at once, with three
-    distinct answers: if any two keys ever hold the same array, the probes
-    would be trained to distinguish rules the simulator never separated.
-    """
     positions = np.array([[50.0, 50.0],
                           [55.0, 50.0],
                           [50.0, 58.0]])
@@ -275,12 +206,6 @@ def test_step_records_all_three_rules_separately():
 
 
 def test_step_reads_the_min_speed():
-    """A floor that step accepts and never forwards is invisible.
-
-    Two birds 70 units apart, outside every radius, so no rule fires and the
-    only thing that can change their velocity is the floor. With it off they
-    coast at speed 1; with it on they must be flying at min_speed.
-    """
     positions = np.array([[10.0, 10.0], [60.0, 60.0]])
     velocities = np.array([[1.0, 0.0], [-1.0, 0.0]])
 
@@ -292,13 +217,6 @@ def test_step_reads_the_min_speed():
 
 
 def test_step_reads_the_dt():
-    """dt must reach both the velocity update and the position update.
-
-    Every other test in this suite runs at dt=0.1, so `step` ignoring
-    physics.dt and using the literal 0.1 was invisible until this existed. The
-    dataset config would then claim one timestep while the simulator ran
-    another, and every number in the file would look completely reasonable.
-    """
     # neighbours in range, so the forces are non-zero and dt has to scale them
     positions = np.array([[50.0, 50.0], [55.0, 50.0]])
     velocities = np.zeros((2, 2))
@@ -315,13 +233,6 @@ def test_step_reads_the_dt():
 
 
 def test_step_reads_the_bounds():
-    """The world size must come from physics, not from a literal.
-
-    A single bird half a step from the seam of a 50-wide world. If `bounds`
-    were hardcoded to 100 it would sail past 50 and sit outside its own world,
-    where get_torus silently starts returning the wrong displacement for
-    everything.
-    """
     small_world = replace(PHYSICS, bounds=50.0, separation_radius=20.0,
                           alignment_radius=20.0, cohesion_radius=20.0)
     positions = np.array([[49.9, 25.0]])
@@ -333,20 +244,6 @@ def test_step_reads_the_bounds():
 
 
 def test_recorded_forces_match_the_rules_applied_to_the_input_state():
-    """The strongest statement this suite can make about the labels.
-
-    For every bird in a real flock, each recorded force must equal its own rule
-    function, at its own radius, times its own weight, evaluated on the state
-    that was passed *in*. That single assertion pins at once: the right rule in
-    the right key, the right constant reaching the right rule, bird i's force
-    stored at index i, and - the one nothing else covers - the labels
-    describing the world at tick t rather than the world at tick t+1.
-
-    That last one is the quietest possible label bug. Forces computed from the
-    updated positions would still satisfy the reconstruction invariant, because
-    that invariant only checks that the recorded numbers reproduce the velocity
-    update - not which world they were measured in.
-    """
     # the shipped world: soft radius edges and the per-rule cap, so each label
     # is its rule at the shipped softness, times its weight, then capped
     from boids import force_capper
@@ -385,14 +282,6 @@ def test_recorded_forces_match_the_rules_applied_to_the_input_state():
 # --- dtype: what survives being written to disk and read back ----------------
 
 def test_step_accepts_integer_input_without_truncating():
-    """Integer positions must not quantise the world to a lattice.
-
-    `np.zeros_like(positions)` without `dtype=float` inherits int64 from an
-    integer input, and every position then rounds to a whole number on every
-    tick. Birds would snap to a 1x1 grid, all three rules would be computed
-    from quantised distances, and nothing would raise - the flock would simply
-    be wrong in a way that looks like a rendering choice.
-    """
     positions = np.array([[10, 10], [15, 10], [80, 80]])
     velocities = np.array([[1, 0], [-1, 0], [0, 1]])
     assert positions.dtype == np.int64 and velocities.dtype == np.int64
@@ -409,13 +298,6 @@ def test_step_accepts_integer_input_without_truncating():
 
 
 def test_step_always_computes_in_float64():
-    """float32 in, float64 out - deliberately.
-
-    The dataset will be stored as float32 to keep it small, but the simulation
-    itself should not inherit that precision from whatever it was handed. This
-    pins the promotion so a future refactor cannot quietly make the physics
-    depend on the caller's dtype.
-    """
     positions, velocities = random_flock(seed=0, n_birds=10)
     positions, velocities = positions.astype(np.float32), velocities.astype(np.float32)
 
@@ -428,15 +310,6 @@ def test_step_always_computes_in_float64():
 
 
 def test_the_reconstruction_invariant_is_exact_in_float64():
-    """Not approximately equal - bit for bit identical.
-
-    Every other reconstruction test allows a tolerance. Measured over 200 ticks
-    of a real flock the error is exactly zero, because `step` and the
-    reconstruction perform the same operations in the same order on the same
-    float64 values. Asserting equality rather than closeness means any future
-    reordering that introduces rounding shows up here first, while it is still
-    one line of blame rather than a drift in a trained result.
-    """
     physics = PHYSICS_CRUISING
     positions, velocities = random_flock(seed=3, n_birds=15)
 
@@ -454,15 +327,6 @@ def test_the_reconstruction_invariant_is_exact_in_float64():
 
 
 def test_the_reconstruction_invariant_survives_float32_storage():
-    """What the invariant is actually worth once the labels are on disk.
-
-    The dataset stores velocities and forces as float32. Reading them back and
-    re-deriving the velocity update can no longer be exact - measured worst
-    case 2.9e-07, about 2.4x float32 epsilon. Anything materially larger than
-    that means precision is being lost somewhere other than the cast, and a
-    test asserting exact equality against reloaded data would fail for a reason
-    that has nothing to do with the simulator.
-    """
     physics = PHYSICS_CRUISING
     positions, velocities = random_flock(seed=3, n_birds=15)
     worst = 0.0

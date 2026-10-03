@@ -40,7 +40,6 @@ DT = PHYSICS.dt
 
 
 def random_flock(seed, n_birds):
-    """A deterministic starting world. Same seed, same flock, always."""
     rng = np.random.default_rng(seed)
     positions = rng.uniform(0.0, BOUNDS, size=(n_birds, 2))
     velocities = rng.uniform(-MAX_SPEED, MAX_SPEED, size=(n_birds, 2))

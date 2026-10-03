@@ -23,18 +23,10 @@ def x():
 
 
 def test_it_comes_back_the_same_shape(feedforward, x):
-    """Wide in the middle, but it has to fit back into the residual stream."""
     assert feedforward(x).shape == x.shape
 
 
 def test_it_is_actually_nonlinear(feedforward, x):
-    """The whole reason this block exists.
-
-    Any affine map satisfies f(x+h) + f(x-h) == 2*f(x) exactly - the bias
-    cancels, so this isolates the bend itself rather than catching a bias by
-    accident. If this passes as an equality, the two Linears have collapsed
-    into one and the model can never exceed what a linear fit already gets.
-    """
     torch.manual_seed(2)
     h = torch.randn(BATCH, CONTEXT, D_MODEL)
 
@@ -47,7 +39,6 @@ def test_it_is_actually_nonlinear(feedforward, x):
 
 
 def test_nothing_mixes_across_ticks(feedforward, x):
-    """Each tick is computed on its own. Mixing is attention's job, not this."""
     before = feedforward(x)
 
     tampered = x.clone()
@@ -61,16 +52,10 @@ def test_nothing_mixes_across_ticks(feedforward, x):
 
 
 def test_it_does_something(feedforward, x):
-    """Guards against a forward that widens and forgets to narrow back."""
     assert not torch.allclose(feedforward(x), x, atol=1e-6)
 
 
 def test_every_parameter_gets_a_gradient(feedforward, x):
-    """A layer built as a local instead of onto self is invisible to the optimiser.
-
-    It still runs, still contributes to the output, and never learns anything -
-    which looks like a model that simply trains badly.
-    """
     feedforward(x).sum().backward()
 
     for name, parameter in feedforward.named_parameters():
@@ -79,5 +64,4 @@ def test_every_parameter_gets_a_gradient(feedforward, x):
 
 
 def test_two_calls_agree(feedforward, x):
-    """No dropout. A held-out score has to be repeatable."""
     torch.testing.assert_close(feedforward(x), feedforward(x), atol=0, rtol=0)
