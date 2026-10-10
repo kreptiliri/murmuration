@@ -6,14 +6,16 @@ A small transformer learns to fly a boids flock by watching, then I check where 
 
 Website: https://kreptiliri.github.io/murmuration/
 
+By Iliass.
+
 ## Results
 
 - It flies the flock. On 300 clips it never trained on, it predicts each bird's next move with R² 0.990 to 0.994 across 4 runs. It also flies 50 birds after training on 12.
 - The rules are easy to read out of its notes, and some can be read before any training.
 - Deafening round two removes line up in all 4 runs. The other two rules are split between the two rounds differently in each run.
-- So finding a rule in the notes doesn't prove the machine uses it. Line up is readable after round one, but the machine only uses it in round two.
+- So finding a rule in the notes doesn't prove the machine uses it there. Line up is readable after round one, but deafen round two and it is gone.
 
-## What's in here
+## What I built
 
 - `boids.py`: the simulator. 12 birds in a 100 x 100 world that wraps at the edges, three rules (separation, alignment, cohesion), speed limits, a cap on each rule's force and soft radius edges. It records every rule's push on every bird at every tick.
 - `generate.py`: runs the simulator to build a dataset of clips and writes `config.json` with the physics and the git commit it came from.
@@ -28,9 +30,17 @@ Website: https://kreptiliri.github.io/murmuration/
 - `tests/`: the test suite.
 - `docs/`: the website.
 
-## Run it yourself
+## How to run it
 
 Python 3.14 with torch 2.14, numpy 2.5, matplotlib 3.11 and pytest 9.1. I trained everything on a laptop CPU (M4 MacBook Air).
+
+Install them:
+
+```
+pip install torch numpy matplotlib pytest
+```
+
+Run the tests:
 
 ```
 python -m pytest -q
