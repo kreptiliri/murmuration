@@ -45,21 +45,28 @@ python generate.py --clips 1000 --ticks 500 --out data/v2_big
 Train one run. Each run took about 40 minutes. I ran seeds 0, 1, 2 and 3.
 
 ```
-python train.py --data data/v2_big --clips 1000 --context 2 --model rel_per_bird --symmetries --passes 30 --seed 0 --log-checkpoints 8 --checkpoint-dir checkpoints/rel_v2_log_s0 --report-every 1
+python train.py --data data/v2_big --clips 1000 \
+  --context 2 --model rel_per_bird --symmetries \
+  --passes 30 --seed 0 \
+  --log-checkpoints 8 --checkpoint-dir checkpoints/rel_v2_log_s0 \
+  --report-every 1
 ```
 
 Probe and ablate every checkpoint of that run. The probe sweep took about 7 minutes and the ablation sweep about 4.
 
 ```
-python probe.py --checkpoint-dir checkpoints/rel_v2_log_s0 --data data/v2_big --clips 1000 --sweep --out readability_s0.json
-python ablate.py --checkpoint-dir checkpoints/rel_v2_log_s0 --data data/v2_big --clips 1000 --sweep --out ablation_s0.json
+python probe.py --checkpoint-dir checkpoints/rel_v2_log_s0 \
+  --data data/v2_big --clips 1000 --sweep --out readability_s0.json
+python ablate.py --checkpoint-dir checkpoints/rel_v2_log_s0 \
+  --data data/v2_big --clips 1000 --sweep --out ablation_s0.json
 ```
 
 Plot them:
 
 ```
 python plot_readability.py readability_s0.json --out readability_s0.png
-python plot_ablation.py ablation_s0.json --readability readability_s0.json --out ablation_s0.png
+python plot_ablation.py ablation_s0.json \
+  --readability readability_s0.json --out ablation_s0.png
 ```
 
 The probe is fitted on clips 0-49 and scored on clips 700-719. The ablation is scored on clips 700-719.
