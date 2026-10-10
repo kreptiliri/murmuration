@@ -8,9 +8,4 @@ data/
 *.pt
 *.npz
 .pytest_cache/
-
-a_small_roadmapforme.txt
-quick_peek.py
-peek.png
-torch_notes.md
-look.py
+site_export/
