@@ -390,6 +390,8 @@ body:not([data-scene="9"]) .panes{display:none}
 .finale-more{margin:6px 0 0;display:flex;flex-wrap:wrap;gap:12px 34px}
 .finale-more a{font-family:var(--display);font-weight:700;font-size:17px;color:var(--ink);text-decoration:underline;text-decoration-thickness:2px;text-underline-offset:5px}
 .finale-more a::after{content:' \2193'}
+.finale-more .byline{margin-left:auto;align-self:center;font-family:var(--mono);font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-2)}   /* the credit, at the end of the story */
+@media (max-width:899px){.finale-more .byline{margin-left:0;flex-basis:100%}}
 .signoff a::after{content:' \2197'}
 .finale-more a.ext::after,.code-link a::after{content:'';display:inline-block;width:.62em;height:.62em;margin-left:.32em;vertical-align:.02em;background:currentColor;-webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 9.5 9.5 2.5M4 2.5h5.5V8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat;mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 9.5 9.5 2.5M4 2.5h5.5V8' fill='none' stroke='%23000' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center/contain no-repeat}   /* the display font has no out-arrow, so it is drawn, as heavy as the text */
 .qa .q{color:var(--ink);font-family:var(--display);font-weight:600;font-size:clamp(19px,1.55vw,24px);line-height:1.22;min-height:2.44em;text-wrap:balance}
