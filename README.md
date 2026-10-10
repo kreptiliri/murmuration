@@ -19,7 +19,7 @@ By Iliass.
 
 - `boids.py`: the simulator. 12 birds in a 100 x 100 world that wraps at the edges, three rules (separation, alignment, cohesion), speed limits, a cap on each rule's force and soft radius edges. It records every rule's push on every bird at every tick.
 - `generate.py`: runs the simulator to build a dataset of clips and writes `config.json` with the physics and the git commit it came from.
-- `windows.py`: cuts clips into training windows. The last two ticks go in and the next change in velocity comes out, plus each rule’s push on the same birds.
+- `windows.py`: cuts clips into training windows. The last two ticks go in and the next change in velocity comes out, plus each rule's push on the same birds.
 - `flocker.py`: the models. A transformer with one token per tick, one with one token per bird, and `RelPerBirdTransformer`, which every result uses. Its attention is told the offset and distance between each pair of birds.
 - `train.py`: splits clips 70/30, scales the data, trains the chosen model, saves checkpoints and prints the held-out R².
 - `probe.py`: fits a ridge regression on the model's notes (its hidden state after each round) to see how well each rule's push can be read from them, at every checkpoint.
@@ -82,6 +82,14 @@ python plot_ablation.py ablation_s0.json \
 The probe is fitted on clips 0-49 and scored on clips 700-719. The ablation is scored on clips 700-719.
 
 Simulator details are in [PHYSICS.md](PHYSICS.md).
+
+## How it got there
+
+How the project went, drawn out, including what didn't work first.
+
+![Page 1: the model wasn't using the flock, one token per bird, the gap between two birds](docs/how_it_got_there_page1.png)
+
+![Page 2: readable before any practice, the four runs, the short version, what didn't work first](docs/how_it_got_there_page2.png)
 
 ## License
 
